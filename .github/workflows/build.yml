@@ -37,7 +37,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          grep -Fxq 'version: 1.0.21+24' pubspec.yaml
+          grep -Fxq 'version: 1.0.22+25' pubspec.yaml
           grep -Fq 'applicationId = "com.example.abrj_iraq"' android/app/build.gradle.kts
 
       - name: Accept Android licenses
