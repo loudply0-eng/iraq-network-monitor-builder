@@ -657,10 +657,10 @@ class MainActivity : FlutterActivity() {
                         }
 
                         // Verify APK package identity and signing certificate before Android's installer.
+                        @Suppress("DEPRECATION")
                         val signingFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                             PackageManager.GET_SIGNING_CERTIFICATES
                         } else {
-                            @Suppress("DEPRECATION")
                             PackageManager.GET_SIGNATURES
                         }
                         val archiveInfo = packageManager.getPackageArchiveInfo(
