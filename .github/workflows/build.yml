@@ -66,8 +66,7 @@ jobs:
             echo "configured=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Prepare persistent release signing key
-        if: steps.signing.outputs.configured == 'true'
+      - name: Prepare release signing key
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -75,51 +74,58 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > android/app/upload-keystore.jks
+          if [[ "${{ steps.signing.outputs.configured }}" == "true" ]]; then
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > android/app/upload-keystore.jks
+            STORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD"
+            KEY_ALIAS="$ANDROID_KEY_ALIAS"
+            KEY_PASSWORD="$ANDROID_KEY_PASSWORD"
+          else
+            keytool -genkeypair -v               -keystore android/app/upload-keystore.jks               -storepass temporary-build-password               -alias temporary-build-key               -keypass temporary-build-password               -keyalg RSA -keysize 2048 -validity 1               -dname "CN=Temporary Build Key, O=Build Only, C=IQ"
+            STORE_PASSWORD="temporary-build-password"
+            KEY_ALIAS="temporary-build-key"
+            KEY_PASSWORD="temporary-build-password"
+          fi
           chmod 600 android/app/upload-keystore.jks
-          python3 - <<'PY'
+          python3 - <<PY
           import os
           def escape(value):
-              value = value.replace("\\", "\\\\")
+              value = value.replace("\\\\", "\\\\\\\\")
               for char in ("=", ":", "#", "!"):
-                  value = value.replace(char, "\\" + char)
+                  value = value.replace(char, "\\\\" + char)
               return value
           values = {
               "storeFile": "upload-keystore.jks",
-              "storePassword": os.environ["ANDROID_KEYSTORE_PASSWORD"],
-              "keyAlias": os.environ["ANDROID_KEY_ALIAS"],
-              "keyPassword": os.environ["ANDROID_KEY_PASSWORD"],
+              "storePassword": os.environ["STORE_PASSWORD"],
+              "keyAlias": os.environ["KEY_ALIAS"],
+              "keyPassword": os.environ["KEY_PASSWORD"],
           }
           with open("android/key.properties", "w", encoding="utf-8") as f:
               for key, value in values.items():
                   f.write(f"{key}={escape(value)}" + chr(10))
           PY
           chmod 600 android/key.properties
+        env:
+          STORE_PASSWORD: ${{ steps.signing.outputs.configured == 'true' && secrets.ANDROID_KEYSTORE_PASSWORD || 'temporary-build-password' }}
+          KEY_ALIAS: ${{ steps.signing.outputs.configured == 'true' && secrets.ANDROID_KEY_ALIAS || 'temporary-build-key' }}
+          KEY_PASSWORD: ${{ steps.signing.outputs.configured == 'true' && secrets.ANDROID_KEY_PASSWORD || 'temporary-build-password' }}
 
-      - name: Build signed release APK
-        if: steps.signing.outputs.configured == 'true'
+      - name: Build release APK
         run: flutter build apk --release --verbose
 
-      - name: Verify release APK signature
-        if: steps.signing.outputs.configured == 'true'
+      - name: Verify APK identity
         run: |
           set -euo pipefail
           APK="build/app/outputs/flutter-apk/app-release.apk"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           test -s "$APK"
           "$APKSIGNER" verify --verbose --print-certs "$APK"
+          echo "Release APK built: $APK"
 
-      - name: Build debug APK for compile testing
-        if: steps.signing.outputs.configured != 'true'
-        run: flutter build apk --debug --verbose
-
-      - name: Upload APK artifact
+      - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
-          name: iraq-network-monitor-${{ github.run_number }}
-          path: |
-            build/app/outputs/flutter-apk/app-release.apk
-            build/app/outputs/flutter-apk/app-debug.apk
+          name: iraq-network-monitor-release-${{ github.run_number }}
+          path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 14
 
