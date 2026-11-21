@@ -29,6 +29,15 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
 class MainActivity : FlutterActivity() {
+    @Suppress("DEPRECATION")
+    private fun signingCertificates(info: android.content.pm.PackageInfo): List<String> {
+        val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.signingInfo?.apkContentsSigners
+        } else {
+            info.signatures
+        }
+        return signatures?.map { it.toCharsString() }?.sorted().orEmpty()
+    }
     // OTA installer compatibility fix: validate package/version and grant content URI access.
     private val CHANNEL = "com.abrjiraq/tower"
     private val displayInfoBySubscription = mutableMapOf<Int, Int>()
@@ -647,10 +656,16 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
 
-                        // Validate the downloaded APK before handing it to Android.
+                        // Verify APK package identity and signing certificate before Android's installer.
+                        val signingFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            PackageManager.GET_SIGNING_CERTIFICATES
+                        } else {
+                            @Suppress("DEPRECATION")
+                            PackageManager.GET_SIGNATURES
+                        }
                         val archiveInfo = packageManager.getPackageArchiveInfo(
                             apkFile.absolutePath,
-                            PackageManager.GET_META_DATA
+                            PackageManager.GET_META_DATA or signingFlags
                         )
                         if (archiveInfo == null) {
                             result.error("INVALID_APK", "Android could not read the downloaded APK", null)
@@ -665,7 +680,19 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
 
-                        val installedInfo = packageManager.getPackageInfo(packageName, 0)
+                        val installedInfo = packageManager.getPackageInfo(packageName, signingFlags)
+                        val apkSignatures = signingCertificates(archiveInfo)
+                        val installedSignatures = signingCertificates(installedInfo)
+                        if (apkSignatures.isEmpty() || installedSignatures.isEmpty() ||
+                            apkSignatures != installedSignatures
+                        ) {
+                            result.error(
+                                "SIGNATURE_MISMATCH",
+                                "Downloaded APK is not signed by the installed app's certificate",
+                                null
+                            )
+                            return@setMethodCallHandler
+                        }
                         val installedVersionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                             installedInfo.longVersionCode
                         } else {
