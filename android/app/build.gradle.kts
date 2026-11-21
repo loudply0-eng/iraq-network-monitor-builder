@@ -14,6 +14,13 @@ if (keystorePropertiesFile.exists()) {
     }
 }
 
+// Codemagic supplies these variables after the original keystore is added
+// to Code signing identities. GitHub Actions continues using key.properties.
+val cmKeystorePath = System.getenv("CM_KEYSTORE_PATH")
+val cmKeystorePassword = System.getenv("CM_KEYSTORE_PASSWORD")
+val cmKeyAlias = System.getenv("CM_KEY_ALIAS")
+val cmKeyPassword = System.getenv("CM_KEY_PASSWORD")
+
 android {
     namespace = "com.example.abrj_iraq"
     compileSdk = flutter.compileSdkVersion
@@ -35,15 +42,17 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file(
-                keystoreProperties.getProperty(
-                    "storeFile",
-                    "MISSING_RELEASE_KEYSTORE.jks"
-                )
-            )
-            storePassword = keystoreProperties.getProperty("storePassword", "")
-            keyAlias = keystoreProperties.getProperty("keyAlias", "")
-            keyPassword = keystoreProperties.getProperty("keyPassword", "")
+            storeFile = if (!cmKeystorePath.isNullOrBlank()) {
+                file(cmKeystorePath)
+            } else {
+                file(keystoreProperties.getProperty("storeFile", "MISSING_RELEASE_KEYSTORE.jks"))
+            }
+            storePassword = cmKeystorePassword
+                ?: keystoreProperties.getProperty("storePassword", "")
+            keyAlias = cmKeyAlias
+                ?: keystoreProperties.getProperty("keyAlias", "")
+            keyPassword = cmKeyPassword
+                ?: keystoreProperties.getProperty("keyPassword", "")
         }
     }
 
