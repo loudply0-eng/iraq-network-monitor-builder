@@ -775,12 +775,63 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     if (!mounted || checkingForUpdates) return;
     setState(() => checkingForUpdates = true);
     try {
-      final response = await http
-          .get(Uri.parse(versionUrl), headers: {'Cache-Control': 'no-cache'})
-          .timeout(const Duration(seconds: 25));
-      if (response.statusCode != 200) throw Exception(tr('تعذر قراءة بيانات التحديث', 'Could not read update information'));
-      final decoded = jsonDecode(response.body);
-      if (decoded is! Map<String, dynamic>) throw Exception(tr('بيانات الإصدار غير صحيحة', 'Invalid release information'));
+      final updateManifestUri = Uri.parse(versionUrl);
+      if (updateManifestUri.scheme != 'https' ||
+          updateManifestUri.host.toLowerCase() != 'mahmoudaljuorany.store' ||
+          updateManifestUri.port != 443 ||
+          updateManifestUri.userInfo.isNotEmpty ||
+          updateManifestUri.hasFragment) {
+        throw Exception(tr('عنوان خادم التحديث غير موثوق', 'Untrusted update manifest endpoint'));
+      }
+
+      const maxManifestBytes = 64 * 1024;
+      final manifestClient = http.Client();
+      late final List<int> manifestBytes;
+      try {
+        final request = http.Request('GET', updateManifestUri)
+          ..followRedirects = false
+          ..maxRedirects = 0
+          ..headers['Cache-Control'] = 'no-cache'
+          ..headers['Accept-Encoding'] = 'identity';
+        final streamedResponse = await manifestClient
+            .send(request)
+            .timeout(const Duration(seconds: 25));
+
+        if (streamedResponse.statusCode != 200 ||
+            streamedResponse.request?.url != updateManifestUri) {
+          throw Exception(tr(
+            'رفض خادم التحديث أو أعاد توجيه الطلب إلى عنوان آخر',
+            'Update server rejected the request or redirected it',
+          ));
+        }
+        final declaredLength = streamedResponse.contentLength;
+        if (declaredLength != null && declaredLength > maxManifestBytes) {
+          throw Exception(tr(
+            'ملف بيانات التحديث أكبر من الحد المسموح',
+            'Update manifest exceeds the allowed size',
+          ));
+        }
+
+        final receivedBytes = <int>[];
+        await for (final chunk in streamedResponse.stream
+            .timeout(const Duration(seconds: 25))) {
+          if (receivedBytes.length + chunk.length > maxManifestBytes) {
+            throw Exception(tr(
+              'ملف بيانات التحديث أكبر من الحد المسموح',
+              'Update manifest exceeds the allowed size',
+            ));
+          }
+          receivedBytes.addAll(chunk);
+        }
+        manifestBytes = receivedBytes;
+      } finally {
+        manifestClient.close();
+      }
+
+      final decoded = jsonDecode(utf8.decode(manifestBytes));
+      if (decoded is! Map<String, dynamic>) {
+        throw Exception(tr('بيانات الإصدار غير صحيحة', 'Invalid release information'));
+      }
 
       final latestVersion = decoded['latest_version']?.toString().trim() ?? '';
       if (latestVersion.isEmpty) throw Exception(tr('رقم الإصدار غير موجود', 'Version number is missing'));
