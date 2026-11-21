@@ -141,9 +141,9 @@ jobs:
           python3 - <<'PY'
           import os
           def escape(value):
-              value = value.replace("\", "\\")
+              value = value.replace("\\", "\\\\")
               for char in ("=", ":", "#", "!"):
-                  value = value.replace(char, "\" + char)
+                  value = value.replace(char, "\\" + char)
               return value
           values = {
               "storeFile": "upload-keystore.jks",
