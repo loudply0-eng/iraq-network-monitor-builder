@@ -1195,9 +1195,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               sink.add(chunk);
               attemptBytes += chunk.length;
               final currentBytes = existingBytes + attemptBytes;
-              if (totalBytes != null && totalBytes! > 0) {
+              if (totalBytes != null && totalBytes > 0) {
                 final percent =
-                    (currentBytes * 100 / totalBytes!).clamp(0, 100);
+                    (currentBytes * 100 / totalBytes).clamp(0, 100);
                 setUpdateStatus(
                   'جاري تنزيل التحديث: ${percent.toStringAsFixed(0)}% '
                   '($attempt/5)',
