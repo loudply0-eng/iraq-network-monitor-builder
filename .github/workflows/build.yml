@@ -97,12 +97,24 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           set -euo pipefail
-          keytool -list -v \
+          OUTPUT_FILE="$(mktemp)"
+          if ! keytool -list -v \
             -keystore android/app/upload-keystore.jks \
             -storetype PKCS12 \
             -storepass "$ANDROID_KEYSTORE_PASSWORD" \
-            -alias "$ANDROID_KEY_ALIAS" |
-            grep -E "Alias name:|SHA256:"
+            -alias "$ANDROID_KEY_ALIAS" >"$OUTPUT_FILE" 2>&1; then
+            echo "KEYSTORE_VALIDATION_FAILED; safe keytool diagnostic follows:"
+            cat "$OUTPUT_FILE"
+            rm -f "$OUTPUT_FILE"
+            exit 1
+          fi
+          grep -E "Alias name:|SHA256:" "$OUTPUT_FILE" || {
+            echo "KEYSTORE_OPENED_BUT_EXPECTED_FINGERPRINT_LINES_NOT_FOUND"
+            cat "$OUTPUT_FILE"
+            rm -f "$OUTPUT_FILE"
+            exit 1
+          }
+          rm -f "$OUTPUT_FILE"
 
       - name: Build release APK
         env:
