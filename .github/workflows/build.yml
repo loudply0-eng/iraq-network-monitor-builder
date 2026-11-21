@@ -53,23 +53,7 @@ jobs:
       - name: Install Flutter packages
         run: flutter pub get --enforce-lockfile
 
-      - name: Check release signing secrets
-        id: signing
-        shell: bash
-        env:
-          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          if [[ -n "$KEYSTORE" && -n "$STORE_PASSWORD" && -n "$KEY_ALIAS" && -n "$KEY_PASSWORD" ]]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Prepare release signing key
-        id: prepare_key
+      - name: Prepare original release signing key
         shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -78,25 +62,21 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          if [[ "${{ steps.signing.outputs.configured }}" == "true" ]]; then
-            printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > android/app/upload-keystore.jks
-            export STORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD"
-            export KEY_ALIAS="$ANDROID_KEY_ALIAS"
-            export KEY_PASSWORD="$ANDROID_KEY_PASSWORD"
-          else
-            keytool -genkeypair -v -keystore android/app/upload-keystore.jks -storepass temporary-build-password -alias temporary-build-key -keypass temporary-build-password -keyalg RSA -keysize 2048 -validity 1 -dname "CN=Temporary Build Key, O=Build Only, C=IQ"
-            export STORE_PASSWORD="temporary-build-password"
-            export KEY_ALIAS="temporary-build-key"
-            export KEY_PASSWORD="temporary-build-password"
-          fi
+          test -n "$ANDROID_KEYSTORE_BASE64" || { echo "Missing original release keystore secret"; exit 1; }
+          test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo "Missing original keystore password secret"; exit 1; }
+          test -n "$ANDROID_KEY_ALIAS" || { echo "Missing original key alias secret"; exit 1; }
+          test -n "$ANDROID_KEY_PASSWORD" || { echo "Missing original key password secret"; exit 1; }
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > android/app/upload-keystore.jks
           chmod 600 android/app/upload-keystore.jks
-          export STORE_PASSWORD KEY_ALIAS KEY_PASSWORD
+          export STORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD"
+          export KEY_ALIAS="$ANDROID_KEY_ALIAS"
+          export KEY_PASSWORD="$ANDROID_KEY_PASSWORD"
           python3 - <<'PY'
           import os
           def escape(value):
-              value = value.replace("\\", "\\\\")
+              value = value.replace("\\\\", "\\\\\\\\")
               for char in ("=", ":", "#", "!"):
-                  value = value.replace(char, "\\" + char)
+                  value = value.replace(char, "\\\\" + char)
               return value
           values = {
               "storeFile": "upload-keystore.jks",
@@ -106,7 +86,7 @@ jobs:
           }
           with open("android/key.properties", "w", encoding="utf-8") as f:
               for key, value in values.items():
-                  f.write(f"{key}={escape(value)}\n")
+                  f.write(f"{key}={escape(value)}\\n")
           PY
           chmod 600 android/key.properties
 
@@ -119,8 +99,14 @@ jobs:
           APK="build/app/outputs/flutter-apk/app-release.apk"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           test -s "$APK"
-          "$APKSIGNER" verify --verbose --print-certs "$APK"
-          echo "Release APK built: $APK"
+          SIGNATURE_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$APK" 2>&1)"
+          printf '%s\\n' "$SIGNATURE_OUTPUT"
+          EXPECTED_CERT_SHA256="f29ff0e87eabbe89ce0664727652e870eddca3acbfbfe9fab18505e0340b62b8"
+          grep -Fqi "Signer #1 certificate SHA-256 digest: $EXPECTED_CERT_SHA256" <<< "$SIGNATURE_OUTPUT" || {
+            echo "APK signing certificate does not match the established production certificate."
+            exit 1
+          }
+          echo "Original production signing certificate verified: $APK"
 
       - name: Upload release APK
         uses: actions/upload-artifact@v4
