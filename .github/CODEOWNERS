@@ -1,0 +1,9 @@
+# Require the repository owner to review security-sensitive application changes.
+/.github/workflows/ @loudply0-eng
+/.github/dependabot.yml @loudply0-eng
+/android/app/build.gradle.kts @loudply0-eng
+/android/app/src/main/AndroidManifest.xml @loudply0-eng
+/android/app/src/main/kotlin/ @loudply0-eng
+/lib/ @loudply0-eng
+/pubspec.yaml @loudply0-eng
+/pubspec.lock @loudply0-eng
