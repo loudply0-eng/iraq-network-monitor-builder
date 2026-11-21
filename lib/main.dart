@@ -383,6 +383,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   String tcpLatencyResult = '';
   bool showHeatmap = false;
   bool showDriveTest = true;
+  int mapStyleIndex = 0;
 
   bool get isDark => Theme.of(context).brightness == Brightness.dark;
   Color get accentColor => AppPreferences.accentColors[AppPreferences.accentIndex.value];
@@ -2670,8 +2671,22 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
           mapController: mapController,
           children: [
             TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              urlTemplate: mapStyleIndex == 0
+                  ? 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+                  : mapStyleIndex == 1
+                      ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+                      : 'https://tile.opentopomap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'com.example.abrj_iraq',
+            ),
+            RichAttributionWidget(
+              attributions: [
+                if (mapStyleIndex == 0)
+                  TextSourceAttribution('© OpenStreetMap contributors'),
+                if (mapStyleIndex == 1)
+                  TextSourceAttribution('Tiles © Esri'),
+                if (mapStyleIndex == 2)
+                  TextSourceAttribution('© OpenTopoMap (CC-BY-SA)'),
+              ],
             ),
             if (showHeatmap)
               CircleLayer(circles: buildHeatmapCircles()),
@@ -2720,6 +2735,24 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                     spacing: 8,
                     runSpacing: 4,
                     children: [
+                      ChoiceChip(
+                        selected: mapStyleIndex == 0,
+                        label: Text(tr('الشوارع', 'Street')),
+                        avatar: const Icon(Icons.map_outlined, size: 17),
+                        onSelected: (_) => setState(() => mapStyleIndex = 0),
+                      ),
+                      ChoiceChip(
+                        selected: mapStyleIndex == 1,
+                        label: Text(tr('قمر صناعي', 'Satellite')),
+                        avatar: const Icon(Icons.satellite_alt, size: 17),
+                        onSelected: (_) => setState(() => mapStyleIndex = 1),
+                      ),
+                      ChoiceChip(
+                        selected: mapStyleIndex == 2,
+                        label: Text(tr('تضاريس', 'Terrain')),
+                        avatar: const Icon(Icons.terrain, size: 17),
+                        onSelected: (_) => setState(() => mapStyleIndex = 2),
+                      ),
                       FilterChip(
                         selected: showHeatmap,
                         label: Text(tr('خريطة قوة الإشارة', 'Signal heatmap')),
