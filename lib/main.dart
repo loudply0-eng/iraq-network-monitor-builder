@@ -784,7 +784,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       if (decoded is! Map<String, dynamic>) throw Exception(tr('بيانات الإصدار غير صحيحة', 'Invalid release information'));
 
       final latestVersion = decoded['latest_version']?.toString().trim() ?? '';
-      if (!RegExp(r'^\\d+\\.\\d+\\.\\d+\\+\\d+
+      if (!RegExp(r'^\d+\.\d+\.\d+\+\d+$').hasMatch(latestVersion)) {
+        throw Exception(tr('رقم الإصدار غير صالح', 'Invalid release version'));
+      }
       final packageInfo = await PackageInfo.fromPlatform();
       final currentVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
       if (compareVersions(latestVersion, currentVersion) <= 0) {
