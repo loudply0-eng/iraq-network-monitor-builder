@@ -3,14 +3,16 @@ name: Build Iraq Network Monitor APK
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: android-build-${{ github.ref }}
-  cancel-in-progress: true
+  group: android-build-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -19,6 +21,8 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -37,7 +41,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          grep -Fxq 'version: 1.0.21+24' pubspec.yaml
+          grep -Eq '^version: [0-9]+[.][0-9]+[.][0-9]+[+][0-9]+$' pubspec.yaml
           grep -Fq 'applicationId = "com.example.abrj_iraq"' android/app/build.gradle.kts
 
       - name: Accept Android licenses
@@ -51,23 +55,8 @@ jobs:
       - name: Install Flutter packages
         run: flutter pub get --enforce-lockfile
 
-      - name: Check release signing secrets
-        id: signing
-        shell: bash
-        env:
-          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          if [[ -n "$KEYSTORE" && -n "$STORE_PASSWORD" && -n "$KEY_ALIAS" && -n "$KEY_PASSWORD" ]]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Prepare release signing key
-        id: prepare_key
+      - name: Prepare original release signing key
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -76,19 +65,15 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          if [[ "${{ steps.signing.outputs.configured }}" == "true" ]]; then
-            printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > android/app/upload-keystore.jks
-            export STORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD"
-            export KEY_ALIAS="$ANDROID_KEY_ALIAS"
-            export KEY_PASSWORD="$ANDROID_KEY_PASSWORD"
-          else
-            keytool -genkeypair -v -keystore android/app/upload-keystore.jks -storepass temporary-build-password -alias temporary-build-key -keypass temporary-build-password -keyalg RSA -keysize 2048 -validity 1 -dname "CN=Temporary Build Key, O=Build Only, C=IQ"
-            export STORE_PASSWORD="temporary-build-password"
-            export KEY_ALIAS="temporary-build-key"
-            export KEY_PASSWORD="temporary-build-password"
-          fi
+          test -n "$ANDROID_KEYSTORE_BASE64" || { echo "Missing original release keystore secret"; exit 1; }
+          test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo "Missing original keystore password secret"; exit 1; }
+          test -n "$ANDROID_KEY_ALIAS" || { echo "Missing original key alias secret"; exit 1; }
+          test -n "$ANDROID_KEY_PASSWORD" || { echo "Missing original key password secret"; exit 1; }
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > android/app/upload-keystore.jks
           chmod 600 android/app/upload-keystore.jks
-          export STORE_PASSWORD KEY_ALIAS KEY_PASSWORD
+          export STORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD"
+          export KEY_ALIAS="$ANDROID_KEY_ALIAS"
+          export KEY_PASSWORD="$ANDROID_KEY_PASSWORD"
           python3 - <<'PY'
           import os
           def escape(value):
@@ -108,25 +93,86 @@ jobs:
           PY
           chmod 600 android/key.properties
 
-      - name: Build release APK
-        run: flutter build apk --release --verbose
+      - name: Verify original keystore before Gradle
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          OUTPUT_FILE="$(mktemp)"
+          if ! keytool -list -v \
+            -keystore android/app/upload-keystore.jks \
+            -storetype PKCS12 \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" >"$OUTPUT_FILE" 2>&1; then
+            echo "KEYSTORE_VALIDATION_FAILED; safe keytool diagnostic follows:"
+            cat "$OUTPUT_FILE"
+            rm -f "$OUTPUT_FILE"
+            exit 1
+          fi
+          grep -E "Alias name:|SHA256:" "$OUTPUT_FILE" || {
+            echo "KEYSTORE_OPENED_BUT_EXPECTED_FINGERPRINT_LINES_NOT_FOUND"
+            cat "$OUTPUT_FILE"
+            rm -f "$OUTPUT_FILE"
+            exit 1
+          }
+          ACTUAL_CERT_SHA256="$(awk -F': ' '/SHA256:/{gsub(":", "", $2); print tolower($2); exit}' "$OUTPUT_FILE")"
+          EXPECTED_CERT_SHA256="f29ff0e87eabbe89ce0664727652e870eddca3acbfbfe9fab18505e0340b62b8"
+          test "$ACTUAL_CERT_SHA256" = "$EXPECTED_CERT_SHA256" || {
+            echo "Release keystore certificate does not match the established production certificate."
+            rm -f "$OUTPUT_FILE"
+            exit 1
+          }
+          echo "Original production signing certificate verified."
+          rm -f "$OUTPUT_FILE"
+
+      - name: Build signed release APK (trusted main only)
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: flutter build apk --release --obfuscate --split-debug-info=build/symbols/${GITHUB_RUN_ID} --verbose
+
+      - name: Build unsigned debug APK for pull requests
+        if: github.event_name != 'workflow_dispatch' || github.ref != 'refs/heads/main'
+        run: flutter build apk --debug --verbose
 
       - name: Verify APK identity
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
           APK="build/app/outputs/flutter-apk/app-release.apk"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           test -s "$APK"
-          "$APKSIGNER" verify --verbose --print-certs "$APK"
-          echo "Release APK built: $APK"
+          SIGNATURE_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$APK" 2>&1)"
+          printf '%s\n' "$SIGNATURE_OUTPUT"
+          EXPECTED_CERT_SHA256="f29ff0e87eabbe89ce0664727652e870eddca3acbfbfe9fab18505e0340b62b8"
+          grep -Eqi "(Signer #1 certificate SHA-256 digest|V[0-9]+ Signer: certificate SHA-256 digest): $EXPECTED_CERT_SHA256" <<< "$SIGNATURE_OUTPUT" || {
+            echo "APK signing certificate does not match the established production certificate."
+            exit 1
+          }
+          echo "Original production signing certificate verified: $APK"
 
-      - name: Upload release APK
+      - name: Upload validated release APK
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: iraq-network-monitor-release-${{ github.run_number }}
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Upload unsigned debug APK (CI only)
+        if: github.event_name != 'workflow_dispatch' || github.ref != 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: iraq-network-monitor-debug-${{ github.run_number }}
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Remove temporary signing material
         if: always()
