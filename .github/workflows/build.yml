@@ -58,6 +58,58 @@ jobs:
       - name: Run Flutter widget tests
         run: flutter test --reporter expanded
 
+      - name: Ensure production version advances the published app
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        run: |
+          python3 - <<'PY'
+          import json
+          import re
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          manifest_url = "https://mahmoudaljuorany.store/version.json"
+          version_text = Path("pubspec.yaml").read_text(encoding="utf-8")
+          match = re.search(r"^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$", version_text, re.M)
+          if not match:
+              raise SystemExit("pubspec.yaml must contain a valid version: x.y.z+build value.")
+          candidate = tuple(int(part) for part in (*match.group(1).split("."), match.group(2)))
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          opener = urllib.request.build_opener(NoRedirect)
+          request = urllib.request.Request(
+              manifest_url,
+              headers={"Cache-Control": "no-cache", "Pragma": "no-cache", "User-Agent": "Iraq-Network-Monitor-Release-CI"},
+          )
+          try:
+              with opener.open(request, timeout=20) as response:
+                  if response.geturl() != manifest_url:
+                      raise SystemExit("Published version manifest URL changed unexpectedly.")
+                  payload = response.read(64 * 1024 + 1)
+                  if len(payload) > 64 * 1024:
+                      raise SystemExit("Published version manifest exceeds the 64 KiB safety limit.")
+                  current = json.loads(payload)
+          except urllib.error.HTTPError as error:
+              raise SystemExit(f"Could not safely read published version manifest (HTTP {error.code}).") from error
+          except Exception as error:
+              raise SystemExit("Could not verify the currently published app version: " + str(error)) from error
+
+          published_text = str(current.get("latest_version", "")).strip() if isinstance(current, dict) else ""
+          published_match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)\+(\d+)", published_text)
+          if not published_match:
+              raise SystemExit("Published manifest has an invalid latest_version.")
+          published = tuple(int(part) for part in published_match.groups())
+          if candidate <= published:
+              raise SystemExit(
+                  f"Refusing release {match.group(1)}+{match.group(2)}: "
+                  f"published version is {published_text}. Increase the app version/build number first."
+              )
+          print(f"Release version {match.group(1)}+{match.group(2)} advances published version {published_text}.")
+          PY
+
       - name: Prepare original release signing key
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         shell: bash
