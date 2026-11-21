@@ -15,6 +15,10 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+class _UpdateSizeLimitException implements Exception {
+  const _UpdateSizeLimitException();
+}
+
 class AppPreferences {
   static final ValueNotifier<bool> english = ValueNotifier<bool>(false);
   static final ValueNotifier<ThemeMode> themeMode = ValueNotifier<ThemeMode>(ThemeMode.dark);
@@ -1109,6 +1113,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     String version,
     String expectedHash,
   ) async {
+    const maxApkBytes = 256 * 1024 * 1024;
     final client = http.Client();
     int? totalBytes;
 
@@ -1118,6 +1123,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       for (var attempt = 1; attempt <= 5; attempt++) {
         var existingBytes =
             await temporaryFile.exists() ? await temporaryFile.length() : 0;
+        if (existingBytes > maxApkBytes) {
+          await temporaryFile.delete();
+          existingBytes = 0;
+        }
         final request = http.Request('GET', url);
         // Never follow redirects: the APK must come directly from the allowlisted host.
         request.followRedirects = false;
@@ -1144,7 +1153,11 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             }
             final rangeStart = int.parse(match.group(1)!);
             final rangeEnd = int.parse(match.group(2)!);
-            totalBytes = int.parse(match.group(3)!);
+            final declaredTotalBytes = int.parse(match.group(3)!);
+            if (declaredTotalBytes > maxApkBytes) {
+              throw const _UpdateSizeLimitException();
+            }
+            totalBytes = declaredTotalBytes;
             if (rangeStart != existingBytes ||
                 rangeEnd < rangeStart ||
                 totalBytes <= 0 ||
@@ -1161,6 +1174,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             // Restart safely instead of appending a duplicate full APK.
             existingBytes = 0;
             totalBytes = response.contentLength;
+            if (totalBytes != null && totalBytes! > maxApkBytes) {
+              throw const _UpdateSizeLimitException();
+            }
           } else {
             throw Exception('APK download failed: HTTP ${response.statusCode}');
           }
@@ -1172,6 +1188,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
           try {
             await for (final chunk
                 in response.stream.timeout(const Duration(seconds: 75))) {
+              final nextBytes = existingBytes + attemptBytes + chunk.length;
+              if (nextBytes > maxApkBytes) {
+                throw const _UpdateSizeLimitException();
+              }
               sink.add(chunk);
               attemptBytes += chunk.length;
               final currentBytes = existingBytes + attemptBytes;
@@ -1204,6 +1224,12 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
           // A clean EOF with no Content-Length is allowed; SHA-256 below
           // remains the authoritative completeness/integrity check.
           break;
+        } on _UpdateSizeLimitException {
+          if (await temporaryFile.exists()) await temporaryFile.delete();
+          throw Exception(tr(
+            'تم رفض ملف التحديث لأن حجمه يتجاوز 256 ميغابايت.',
+            'The update APK was rejected because it exceeds 256 MB.',
+          ));
         } catch (error) {
           if (attempt == 5) {
             throw Exception(
