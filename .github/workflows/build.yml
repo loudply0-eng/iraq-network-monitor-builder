@@ -54,6 +54,7 @@ jobs:
         run: flutter pub get --enforce-lockfile
 
       - name: Prepare original release signing key
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -91,6 +92,7 @@ jobs:
           chmod 600 android/key.properties
 
       - name: Verify original keystore before Gradle
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         shell: bash
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -116,14 +118,20 @@ jobs:
           }
           rm -f "$OUTPUT_FILE"
 
-      - name: Build release APK
+      - name: Build signed release APK (trusted main only)
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: flutter build apk --release --verbose
 
+      - name: Build unsigned debug APK for pull requests
+        if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main'
+        run: flutter build apk --debug --verbose
+
       - name: Verify APK identity
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
           APK="build/app/outputs/flutter-apk/app-release.apk"
@@ -138,13 +146,23 @@ jobs:
           }
           echo "Original production signing certificate verified: $APK"
 
-      - name: Upload release APK
+      - name: Upload validated release APK
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: iraq-network-monitor-release-${{ github.run_number }}
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Upload unsigned debug APK (PR only)
+        if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: iraq-network-monitor-debug-${{ github.run_number }}
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Remove temporary signing material
         if: always()
