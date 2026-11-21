@@ -74,9 +74,9 @@ jobs:
           python3 - <<'PY'
           import os
           def escape(value):
-              value = value.replace("\\\\", "\\\\\\\\")
+              value = value.replace("\\", "\\\\")
               for char in ("=", ":", "#", "!"):
-                  value = value.replace(char, "\\\\" + char)
+                  value = value.replace(char, "\\" + char)
               return value
           values = {
               "storeFile": "upload-keystore.jks",
@@ -86,7 +86,7 @@ jobs:
           }
           with open("android/key.properties", "w", encoding="utf-8") as f:
               for key, value in values.items():
-                  f.write(f"{key}={escape(value)}\\n")
+                  f.write(f"{key}={escape(value)}\n")
           PY
           chmod 600 android/key.properties
 
@@ -100,7 +100,7 @@ jobs:
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           test -s "$APK"
           SIGNATURE_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$APK" 2>&1)"
-          printf '%s\\n' "$SIGNATURE_OUTPUT"
+          printf '%s\n' "$SIGNATURE_OUTPUT"
           EXPECTED_CERT_SHA256="f29ff0e87eabbe89ce0664727652e870eddca3acbfbfe9fab18505e0340b62b8"
           grep -Fqi "Signer #1 certificate SHA-256 digest: $EXPECTED_CERT_SHA256" <<< "$SIGNATURE_OUTPUT" || {
             echo "APK signing certificate does not match the established production certificate."
