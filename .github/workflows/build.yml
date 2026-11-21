@@ -61,9 +61,12 @@ jobs:
       - name: Run Flutter widget tests
         run: flutter test --reporter expanded
 
-      - name: Ensure production version advances the published app
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+      - name: Decide whether a new production release is required
+        id: release_gate
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        shell: bash
         run: |
+          set -euo pipefail
           python3 - <<'PY'
           import json
           import re
@@ -73,9 +76,10 @@ jobs:
 
           manifest_url = "https://mahmoudaljuorany.store/version.json"
           version_text = Path("pubspec.yaml").read_text(encoding="utf-8")
-          match = re.search(r"^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$", version_text, re.M)
+          match = re.search(r"^version:\\s*(\\d+\\.\\d+\\.\\d+)\\+(\\d+)\\s*$", version_text, re.M)
           if not match:
-              raise SystemExit("pubspec.yaml must contain a valid version: x.y.z+build value.")
+              raise SystemExit("pubspec.yaml must contain version: x.y.z+build.")
+          candidate_text = f"{match.group(1)}+{match.group(2)}"
           candidate = tuple(int(part) for part in (*match.group(1).split("."), match.group(2)))
 
           class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -93,28 +97,30 @@ jobs:
                       raise SystemExit("Published version manifest URL changed unexpectedly.")
                   payload = response.read(64 * 1024 + 1)
                   if len(payload) > 64 * 1024:
-                      raise SystemExit("Published version manifest exceeds the 64 KiB safety limit.")
+                      raise SystemExit("Published version manifest exceeds 64 KiB.")
                   current = json.loads(payload)
           except urllib.error.HTTPError as error:
               raise SystemExit(f"Could not safely read published version manifest (HTTP {error.code}).") from error
           except Exception as error:
-              raise SystemExit("Could not verify the currently published app version: " + str(error)) from error
+              raise SystemExit("Could not verify the published app version: " + str(error)) from error
 
           published_text = str(current.get("latest_version", "")).strip() if isinstance(current, dict) else ""
-          published_match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)\+(\d+)", published_text)
+          published_match = re.fullmatch(r"(\\d+)\\.(\\d+)\\.(\\d+)\\+(\\d+)", published_text)
           if not published_match:
-              raise SystemExit("Published manifest has an invalid latest_version.")
+              raise SystemExit("Published version.json has an invalid latest_version.")
           published = tuple(int(part) for part in published_match.groups())
           if candidate <= published:
-              raise SystemExit(
-                  f"Refusing release {match.group(1)}+{match.group(2)}: "
-                  f"published version is {published_text}. Increase the app version/build number first."
-              )
-          print(f"Release version {match.group(1)}+{match.group(2)} advances published version {published_text}.")
+              print(f"No release needed: source {candidate_text}, already published {published_text}.")
+              with open(__import__("os").environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                  output.write("should_release=false\\n")
+          else:
+              print(f"New release detected: {candidate_text} (published: {published_text}).")
+              with open(__import__("os").environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                  output.write("should_release=true\\n")
           PY
 
       - name: Prepare original release signing key
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        if: steps.release_gate.outputs.should_release == 'true'
         shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -152,7 +158,7 @@ jobs:
           chmod 600 android/key.properties
 
       - name: Verify original keystore before Gradle
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        if: steps.release_gate.outputs.should_release == 'true'
         shell: bash
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -187,7 +193,7 @@ jobs:
           rm -f "$OUTPUT_FILE"
 
       - name: Build signed release APK (trusted main only)
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        if: steps.release_gate.outputs.should_release == 'true'
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -195,11 +201,11 @@ jobs:
         run: flutter build apk --release --obfuscate --split-debug-info=build/symbols/${GITHUB_RUN_ID} --verbose
 
       - name: Build unsigned debug APK for pull requests
-        if: github.event_name != 'workflow_dispatch' || github.ref != 'refs/heads/main'
+        if: github.event_name == 'pull_request' || steps.release_gate.outputs.should_release != 'true'
         run: flutter build apk --debug --verbose
 
       - name: Verify APK identity
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        if: steps.release_gate.outputs.should_release == 'true'
         run: |
           set -euo pipefail
           APK="build/app/outputs/flutter-apk/app-release.apk"
@@ -215,7 +221,7 @@ jobs:
           echo "Original production signing certificate verified: $APK"
 
       - name: Upload validated release APK
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        if: steps.release_gate.outputs.should_release == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: iraq-network-monitor-release-${{ github.run_number }}
@@ -224,13 +230,114 @@ jobs:
           retention-days: 14
 
       - name: Upload unsigned debug APK (CI only)
-        if: github.event_name != 'workflow_dispatch' || github.ref != 'refs/heads/main'
+        if: github.event_name == 'pull_request' || steps.release_gate.outputs.should_release != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: iraq-network-monitor-debug-${{ github.run_number }}
           path: build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
           retention-days: 3
+
+      - name: Prepare version manifest for automatic server publication
+        if: steps.release_gate.outputs.should_release == 'true'
+        id: publish_metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -nE 's/^version: ([0-9]+\\.[0-9]+\\.[0-9]+\\+[0-9]+)$/\\1/p' pubspec.yaml)"
+          test -n "$VERSION"
+          APK_NAME="iraq-network-monitor-${VERSION/+/-}.apk"
+          APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
+          test -s "$APK_PATH"
+          SHA256="$(sha256sum "$APK_PATH" | awk '{print $1}')"
+          python3 - "$VERSION" "$APK_NAME" "$SHA256" "$RUNNER_TEMP/version.json" <<'PY'
+          import json
+          import re
+          import sys
+          version, apk_name, digest, output_path = sys.argv[1:]
+          if not re.fullmatch(r"\\d+\\.\\d+\\.\\d+\\+\\d+", version):
+              raise SystemExit("Invalid release version.")
+          if not re.fullmatch(r"iraq-network-monitor-[0-9]+\\.[0-9]+\\.[0-9]+-[0-9]+\\.apk", apk_name):
+              raise SystemExit("Invalid APK file name.")
+          if not re.fullmatch(r"[a-f0-9]{64}", digest):
+              raise SystemExit("Invalid APK SHA-256.")
+          manifest = {
+              "latest_version": version,
+              "download_url": "https://mahmoudaljuorany.store/" + apk_name,
+              "sha256": digest,
+              "release_title": "تحديث مراقب شبكات العراق",
+          }
+          with open(output_path, "w", encoding="utf-8") as handle:
+              json.dump(manifest, handle, ensure_ascii=False, indent=2)
+              handle.write("\\n")
+          PY
+          echo "apk_name=$APK_NAME" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Publish signed APK and OTA manifests to update server (SFTP)
+        if: steps.release_gate.outputs.should_release == 'true'
+        shell: bash
+        env:
+          UPDATE_SFTP_HOST: ${{ secrets.UPDATE_SFTP_HOST }}
+          UPDATE_SFTP_PORT: ${{ secrets.UPDATE_SFTP_PORT }}
+          UPDATE_SFTP_USER: ${{ secrets.UPDATE_SFTP_USER }}
+          UPDATE_SFTP_PRIVATE_KEY: ${{ secrets.UPDATE_SFTP_PRIVATE_KEY }}
+          UPDATE_SFTP_KNOWN_HOSTS: ${{ secrets.UPDATE_SFTP_KNOWN_HOSTS }}
+          UPDATE_SFTP_PATH: ${{ secrets.UPDATE_SFTP_PATH }}
+          APK_NAME: ${{ steps.publish_metadata.outputs.apk_name }}
+          RELEASE_VERSION: ${{ steps.publish_metadata.outputs.version }}
+          EXPECTED_SHA256: ${{ steps.publish_metadata.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          for name in UPDATE_SFTP_HOST UPDATE_SFTP_PORT UPDATE_SFTP_USER UPDATE_SFTP_PRIVATE_KEY UPDATE_SFTP_KNOWN_HOSTS UPDATE_SFTP_PATH; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing GitHub Actions secret: $name"
+              echo "Add the SFTP secrets before publishing a release. No files were sent to the server."
+              exit 1
+            fi
+          done
+          [[ "$UPDATE_SFTP_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ "$UPDATE_SFTP_PORT" =~ ^[0-9]{1,5}$ ]]
+          (( UPDATE_SFTP_PORT >= 1 && UPDATE_SFTP_PORT <= 65535 ))
+          [[ "$UPDATE_SFTP_USER" =~ ^[A-Za-z0-9._-]+$ ]]
+          [[ "$UPDATE_SFTP_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]]
+          [[ "$UPDATE_SFTP_PATH" != *".."* ]]
+          [[ "$APK_NAME" =~ ^iraq-network-monitor-[0-9]+\\.[0-9]+\\.[0-9]+-[0-9]+\\.apk$ ]]
+          [[ "$EXPECTED_SHA256" =~ ^[a-f0-9]{64}$ ]]
+
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\\n' "$UPDATE_SFTP_PRIVATE_KEY" > "$HOME/.ssh/ota_deploy_key"
+          printf '%s\\n' "$UPDATE_SFTP_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/ota_deploy_key" "$HOME/.ssh/known_hosts"
+          ssh-keygen -lf "$HOME/.ssh/known_hosts" >/dev/null
+
+          APK_TMP=".$APK_NAME.tmp-$GITHUB_RUN_ID"
+          NOTES_TMP=".release_notes.json.tmp-$GITHUB_RUN_ID"
+          VERSION_TMP=".version.json.tmp-$GITHUB_RUN_ID"
+          cat > "$RUNNER_TEMP/ota_publish.sftp" <<SFTP
+          put build/app/outputs/flutter-apk/app-release.apk "$UPDATE_SFTP_PATH/$APK_TMP"
+          put release_notes.json "$UPDATE_SFTP_PATH/$NOTES_TMP"
+          put "$RUNNER_TEMP/version.json" "$UPDATE_SFTP_PATH/$VERSION_TMP"
+          SFTP
+
+          COMMON_SSH_OPTS=(-p "$UPDATE_SFTP_PORT" -i "$HOME/.ssh/ota_deploy_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" -o ConnectTimeout=20)
+          sftp -b "$RUNNER_TEMP/ota_publish.sftp" -P "$UPDATE_SFTP_PORT" -i "$HOME/.ssh/ota_deploy_key" \\
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \\
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" -o ConnectTimeout=20 \\
+            "$UPDATE_SFTP_USER@$UPDATE_SFTP_HOST"
+
+          # Rename files on the same remote filesystem; publish version.json last.
+          ssh "${COMMON_SSH_OPTS[@]}" "$UPDATE_SFTP_USER@$UPDATE_SFTP_HOST" \\
+            "set -eu; mv -f -- '$UPDATE_SFTP_PATH/$APK_TMP' '$UPDATE_SFTP_PATH/$APK_NAME'; mv -f -- '$UPDATE_SFTP_PATH/$NOTES_TMP' '$UPDATE_SFTP_PATH/release_notes.json'; mv -f -- '$UPDATE_SFTP_PATH/$VERSION_TMP' '$UPDATE_SFTP_PATH/version.json'"
+
+          curl --fail --silent --show-error --max-redirs 0 --max-time 30 \\
+            -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \\
+            'https://mahmoudaljuorany.store/version.json' -o "$RUNNER_TEMP/published-version.json"
+          cmp "$RUNNER_TEMP/version.json" "$RUNNER_TEMP/published-version.json"
+          curl --fail --silent --show-error --head --max-redirs 0 --max-time 30 \\
+            "https://mahmoudaljuorany.store/$APK_NAME" >/dev/null
+          echo "Published and HTTP-verified $RELEASE_VERSION ($APK_NAME), SHA-256 $EXPECTED_SHA256."
 
       - name: Remove temporary signing material
         if: always()
