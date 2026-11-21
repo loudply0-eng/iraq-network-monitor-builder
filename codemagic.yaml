@@ -1,0 +1,43 @@
+workflows:
+  iraq-network-monitor-release:
+    name: Iraq Network Monitor - signed Android release
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+      flutter: 3.50.0
+      android_signing:
+        - iraq_network_monitor_original
+    scripts:
+      - name: Verify source version and application identity
+        script: |
+          set -euo pipefail
+          grep -Eq '^version:[[:space:]]*1\\.0\\.21\\+24[[:space:]]*$' pubspec.yaml
+          grep -Fq 'applicationId = "com.example.abrj_iraq"' android/app/build.gradle.kts
+          test -s android/app/build.gradle.kts
+      - name: Configure Android SDK
+        script: |
+          set -euo pipefail
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
+          echo "flutter.sdk=$FLUTTER_ROOT" >> android/local.properties
+          yes | flutter doctor --android-licenses || true
+      - name: Install locked Flutter dependencies
+        script: flutter pub get --enforce-lockfile
+      - name: Build signed release APK
+        script: flutter build apk --release --verbose
+      - name: Verify APK signature and original certificate
+        script: |
+          set -euo pipefail
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          test -s "$APK"
+          APKSIGNER="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          test -n "$APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee /tmp/abrj-apk-signature.txt
+          grep -Fq 'f29ff0e87eabbe89ce0664727652e870eddca3acbfbfe9fab18505e0340b62b8' /tmp/abrj-apk-signature.txt
+      - name: Verify release APK package metadata
+        script: |
+          set -euo pipefail
+          AAPT="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name aapt | sort -V | tail -1)"
+          "$AAPT" dump badging build/app/outputs/flutter-apk/app-release.apk | grep -F "package: name='com.example.abrj_iraq' versionCode='24' versionName='1.0.21'"
+    artifacts:
+      - build/app/outputs/flutter-apk/app-release.apk
+      - /tmp/abrj-apk-signature.txt
