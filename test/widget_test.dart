@@ -5,6 +5,6 @@ void main() {
   testWidgets('App starts and displays its title', (WidgetTester tester) async {
     await tester.pumpWidget(const MyApp());
 
-    expect(find.text('أبراج العراق'), findsOneWidget);
+    expect(find.text('IRAQ NETWORK MONITOR'), findsOneWidget);
   });
 }
