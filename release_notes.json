@@ -1,8 +1,13 @@
 {
-  "version": "1.0.20+23",
-  "title": "تحسين قراءات LTE RSSNR/SINR",
-  "notes": [
-    "تصحيح قراءة RSSNR بوحدة dB في LTE دون قسمة خاطئة على 10.",
-    "تجاهل القيم غير الصالحة وعرض عدم التوفر بدلاً من بيانات مضللة."
+  "latest_version": "1.0.22+25",
+  "notes_ar": [
+    "إضافة ثلاث طبقات للخريطة: الشوارع، الأقمار الصناعية، والتضاريس.",
+    "إضافة إسناد واضح لمصادر الخرائط.",
+    "الإبقاء على خريطة قوة الإشارة ومسار القياسات."
+  ],
+  "notes_en": [
+    "Added street, satellite imagery, and terrain map layers.",
+    "Added clear map data attributions.",
+    "Kept signal heatmap and measurement route features."
   ]
 }
