@@ -14,8 +14,11 @@ if (keystorePropertiesFile.exists()) {
     }
 }
 
-// Codemagic supplies these variables after the original keystore is added
-// to Code signing identities. GitHub Actions continues using key.properties.
+// Prefer exact environment values in GitHub Actions and Codemagic.
+// This avoids Java .properties encoding/escaping changing password characters.
+val androidKeystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+val androidKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
+val androidKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
 val cmKeystorePath = System.getenv("CM_KEYSTORE_PATH")
 val cmKeystorePassword = System.getenv("CM_KEYSTORE_PASSWORD")
 val cmKeyAlias = System.getenv("CM_KEY_ALIAS")
@@ -47,11 +50,14 @@ android {
             } else {
                 file(keystoreProperties.getProperty("storeFile", "MISSING_RELEASE_KEYSTORE.jks"))
             }
-            storePassword = cmKeystorePassword
+            storePassword = androidKeystorePassword
+                ?: cmKeystorePassword
                 ?: keystoreProperties.getProperty("storePassword", "")
-            keyAlias = cmKeyAlias
+            keyAlias = androidKeyAlias
+                ?: cmKeyAlias
                 ?: keystoreProperties.getProperty("keyAlias", "")
-            keyPassword = cmKeyPassword
+            keyPassword = androidKeyPassword
+                ?: cmKeyPassword
                 ?: keystoreProperties.getProperty("keyPassword", "")
         }
     }

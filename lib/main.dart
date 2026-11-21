@@ -387,6 +387,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   String tcpLatencyResult = '';
   bool showHeatmap = false;
   bool showDriveTest = true;
+  int mapStyleIndex = 0;
 
   bool get isDark => Theme.of(context).brightness == Brightness.dark;
   Color get accentColor => AppPreferences.accentColors[AppPreferences.accentIndex.value];
@@ -838,7 +839,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       }
 
       final latestVersion = decoded['latest_version']?.toString().trim() ?? '';
-      if (latestVersion.isEmpty) throw Exception(tr('رقم الإصدار غير موجود', 'Version number is missing'));
+      if (!RegExp(r'^\d+\.\d+\.\d+\+\d+$').hasMatch(latestVersion)) {
+        throw Exception(tr('رقم الإصدار غير صالح', 'Invalid release version'));
+      }
       final packageInfo = await PackageInfo.fromPlatform();
       final currentVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
       if (compareVersions(latestVersion, currentVersion) <= 0) {
@@ -848,8 +851,15 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
       final downloadUrl = decoded['download_url']?.toString() ?? '';
       final downloadUri = Uri.tryParse(downloadUrl);
-      if (downloadUri == null || downloadUri.scheme != 'https') {
-        throw Exception(tr('رابط التحديث غير صالح', 'Invalid update URL'));
+      if (downloadUri == null ||
+          downloadUri.scheme != 'https' ||
+          downloadUri.host.toLowerCase() != 'mahmoudaljuorany.store' ||
+          downloadUri.port != 443 ||
+          downloadUri.userInfo.isNotEmpty ||
+          downloadUri.hasFragment ||
+          !downloadUri.path.startsWith('/iraq-network-monitor-') ||
+          !downloadUri.path.endsWith('.apk')) {
+        throw Exception(tr('رابط التحديث غير موثوق أو غير صالح', 'Untrusted or invalid update URL'));
       }
       final checksumValue = decoded['sha256'] ?? decoded['sha256_checksum'];
       if (checksumValue == null || checksumValue.toString().trim().isEmpty) {
@@ -933,16 +943,30 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       final uri = Uri.parse(
         'https://mahmoudaljuorany.store/release_notes.json',
       );
-      final response = await http.get(uri, headers: {'Cache-Control': 'no-cache'})
+      final response = await http
+          .get(uri, headers: {'Cache-Control': 'no-cache'})
           .timeout(const Duration(seconds: 12));
       if (response.statusCode != 200) return;
-      final data = jsonDecode(response.body);
-      if (data is! Map<String, dynamic> || data['version']?.toString() != version) return;
-      final notes = _readReleaseNotes(data['notes']);
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) return;
+
+      // Accept both the current release_notes.json schema and the older schema.
+      final releaseVersion =
+          (decoded['latest_version'] ?? decoded['version'])?.toString();
+      if (releaseVersion != version) return;
+
+      final english = AppPreferences.english.value;
+      final notesValue = english
+          ? (decoded['notes_en'] ?? decoded['notes'] ?? decoded['notes_ar'])
+          : (decoded['notes_ar'] ?? decoded['notes'] ?? decoded['notes_en']);
+      final notes = _readReleaseNotes(notesValue);
       if (notes.isNotEmpty) {
-        pendingReleaseTitle = data['title']?.toString().trim().isNotEmpty == true
-            ? data['title'].toString().trim()
-            : pendingReleaseTitle;
+        final titleValue = english
+            ? (decoded['title_en'] ?? decoded['title'])
+            : (decoded['title_ar'] ?? decoded['title']);
+        if (titleValue is String && titleValue.trim().isNotEmpty) {
+          pendingReleaseTitle = titleValue.trim();
+        }
         pendingReleaseNotes = notes;
       }
     } catch (_) {
@@ -1104,6 +1128,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
           existingBytes = 0;
         }
         final request = http.Request('GET', url);
+        // Never follow redirects: the APK must come directly from the allowlisted host.
+        request.followRedirects = false;
+        request.maxRedirects = 0;
         request.headers['Accept-Encoding'] = 'identity';
         request.headers['Cache-Control'] = 'no-cache';
         if (existingBytes > 0) {
@@ -2747,8 +2774,22 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
           mapController: mapController,
           children: [
             TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              urlTemplate: mapStyleIndex == 0
+                  ? 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+                  : mapStyleIndex == 1
+                      ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+                      : 'https://tile.opentopomap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'com.example.abrj_iraq',
+            ),
+            RichAttributionWidget(
+              attributions: [
+                if (mapStyleIndex == 0)
+                  TextSourceAttribution('© OpenStreetMap contributors'),
+                if (mapStyleIndex == 1)
+                  TextSourceAttribution('Tiles © Esri'),
+                if (mapStyleIndex == 2)
+                  TextSourceAttribution('© OpenTopoMap (CC-BY-SA)'),
+              ],
             ),
             if (showHeatmap)
               CircleLayer(circles: buildHeatmapCircles()),
@@ -2797,6 +2838,24 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                     spacing: 8,
                     runSpacing: 4,
                     children: [
+                      ChoiceChip(
+                        selected: mapStyleIndex == 0,
+                        label: Text(tr('الشوارع', 'Street')),
+                        avatar: const Icon(Icons.map_outlined, size: 17),
+                        onSelected: (_) => setState(() => mapStyleIndex = 0),
+                      ),
+                      ChoiceChip(
+                        selected: mapStyleIndex == 1,
+                        label: Text(tr('قمر صناعي', 'Satellite')),
+                        avatar: const Icon(Icons.satellite_alt, size: 17),
+                        onSelected: (_) => setState(() => mapStyleIndex = 1),
+                      ),
+                      ChoiceChip(
+                        selected: mapStyleIndex == 2,
+                        label: Text(tr('تضاريس', 'Terrain')),
+                        avatar: const Icon(Icons.terrain, size: 17),
+                        onSelected: (_) => setState(() => mapStyleIndex = 2),
+                      ),
                       FilterChip(
                         selected: showHeatmap,
                         label: Text(tr('خريطة قوة الإشارة', 'Signal heatmap')),
