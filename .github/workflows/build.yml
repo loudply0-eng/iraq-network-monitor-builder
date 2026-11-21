@@ -132,7 +132,7 @@ jobs:
           SIGNATURE_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$APK" 2>&1)"
           printf '%s\n' "$SIGNATURE_OUTPUT"
           EXPECTED_CERT_SHA256="f29ff0e87eabbe89ce0664727652e870eddca3acbfbfe9fab18505e0340b62b8"
-          grep -Fqi "Signer #1 certificate SHA-256 digest: $EXPECTED_CERT_SHA256" <<< "$SIGNATURE_OUTPUT" || {
+          grep -Eqi "(Signer #1 certificate SHA-256 digest|V[0-9]+ Signer: certificate SHA-256 digest): $EXPECTED_CERT_SHA256" <<< "$SIGNATURE_OUTPUT" || {
             echo "APK signing certificate does not match the established production certificate."
             exit 1
           }
