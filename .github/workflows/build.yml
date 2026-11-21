@@ -201,7 +201,7 @@ jobs:
         run: flutter build apk --release --obfuscate --split-debug-info=build/symbols/${GITHUB_RUN_ID} --verbose
 
       - name: Build unsigned debug APK for pull requests
-        if: github.event_name == 'pull_request' || steps.release_gate.outputs.should_release != 'true'
+        if: github.event_name == 'pull_request'
         run: flutter build apk --debug --verbose
 
       - name: Verify APK identity
@@ -230,7 +230,7 @@ jobs:
           retention-days: 14
 
       - name: Upload unsigned debug APK (CI only)
-        if: github.event_name == 'pull_request' || steps.release_gate.outputs.should_release != 'true'
+        if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: iraq-network-monitor-debug-${{ github.run_number }}
