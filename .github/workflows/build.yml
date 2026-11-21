@@ -301,7 +301,7 @@ jobs:
           for name in UPDATE_SFTP_HOST UPDATE_SFTP_PORT UPDATE_SFTP_USER UPDATE_SFTP_PRIVATE_KEY UPDATE_SFTP_KNOWN_HOSTS UPDATE_SFTP_PATH; do
             [[ -n "${!name:-}" ]] || missing+=("$name")
           done
-          if (("${#missing[@]}" > 0)); then
+          if (( ${#missing[@]} > 0 )); then
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "::warning::Signed APK was built and saved as a GitHub artifact, but server publishing is not configured. Add these Actions secrets: ${missing[*]}."
           else
