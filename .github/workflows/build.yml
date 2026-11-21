@@ -67,6 +67,8 @@ jobs:
           fi
 
       - name: Prepare release signing key
+        id: prepare_key
+        shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -76,22 +78,23 @@ jobs:
           set -euo pipefail
           if [[ "${{ steps.signing.outputs.configured }}" == "true" ]]; then
             printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > android/app/upload-keystore.jks
-            STORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD"
-            KEY_ALIAS="$ANDROID_KEY_ALIAS"
-            KEY_PASSWORD="$ANDROID_KEY_PASSWORD"
+            export STORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD"
+            export KEY_ALIAS="$ANDROID_KEY_ALIAS"
+            export KEY_PASSWORD="$ANDROID_KEY_PASSWORD"
           else
-            keytool -genkeypair -v               -keystore android/app/upload-keystore.jks               -storepass temporary-build-password               -alias temporary-build-key               -keypass temporary-build-password               -keyalg RSA -keysize 2048 -validity 1               -dname "CN=Temporary Build Key, O=Build Only, C=IQ"
-            STORE_PASSWORD="temporary-build-password"
-            KEY_ALIAS="temporary-build-key"
-            KEY_PASSWORD="temporary-build-password"
+            keytool -genkeypair -v -keystore android/app/upload-keystore.jks -storepass temporary-build-password -alias temporary-build-key -keypass temporary-build-password -keyalg RSA -keysize 2048 -validity 1 -dname "CN=Temporary Build Key, O=Build Only, C=IQ"
+            export STORE_PASSWORD="temporary-build-password"
+            export KEY_ALIAS="temporary-build-key"
+            export KEY_PASSWORD="temporary-build-password"
           fi
           chmod 600 android/app/upload-keystore.jks
-          python3 - <<PY
+          export STORE_PASSWORD KEY_ALIAS KEY_PASSWORD
+          python3 - <<'PY'
           import os
           def escape(value):
-              value = value.replace("\\\\", "\\\\\\\\")
+              value = value.replace("\\", "\\\\")
               for char in ("=", ":", "#", "!"):
-                  value = value.replace(char, "\\\\" + char)
+                  value = value.replace(char, "\\" + char)
               return value
           values = {
               "storeFile": "upload-keystore.jks",
@@ -101,13 +104,9 @@ jobs:
           }
           with open("android/key.properties", "w", encoding="utf-8") as f:
               for key, value in values.items():
-                  f.write(f"{key}={escape(value)}" + chr(10))
+                  f.write(f"{key}={escape(value)}\n")
           PY
           chmod 600 android/key.properties
-        env:
-          STORE_PASSWORD: ${{ steps.signing.outputs.configured == 'true' && secrets.ANDROID_KEYSTORE_PASSWORD || 'temporary-build-password' }}
-          KEY_ALIAS: ${{ steps.signing.outputs.configured == 'true' && secrets.ANDROID_KEY_ALIAS || 'temporary-build-key' }}
-          KEY_PASSWORD: ${{ steps.signing.outputs.configured == 'true' && secrets.ANDROID_KEY_PASSWORD || 'temporary-build-password' }}
 
       - name: Build release APK
         run: flutter build apk --release --verbose
