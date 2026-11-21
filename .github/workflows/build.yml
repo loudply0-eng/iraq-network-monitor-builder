@@ -250,17 +250,26 @@ jobs:
           APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
           test -s "$APK_PATH"
           SHA256="$(sha256sum "$APK_PATH" | awk '{print $1}')"
-          python3 - "$VERSION" "$APK_NAME" "$SHA256" "$RUNNER_TEMP/version.json" <<'PY'
+          python3 - "$VERSION" "$APK_NAME" "$SHA256" "$RUNNER_TEMP/version.json" release_notes.json <<'PY'
           import json
           import re
           import sys
-          version, apk_name, digest, output_path = sys.argv[1:]
+          version, apk_name, digest, output_path, notes_path = sys.argv[1:]
           if not re.fullmatch(r"\d+\.\d+\.\d+\+\d+", version):
               raise SystemExit("Invalid release version.")
           if not re.fullmatch(r"iraq-network-monitor-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.apk", apk_name):
               raise SystemExit("Invalid APK file name.")
           if not re.fullmatch(r"[a-f0-9]{64}", digest):
               raise SystemExit("Invalid APK SHA-256.")
+          with open(notes_path, encoding="utf-8") as handle:
+              notes = json.load(handle)
+          notes_version = str(notes.get("latest_version", notes.get("version", ""))).strip()
+          if notes_version != version:
+              raise SystemExit(f"release_notes.json version {notes_version!r} does not match app version {version!r}.")
+          if not isinstance(notes.get("notes_ar"), list) or not notes["notes_ar"]:
+              raise SystemExit("release_notes.json must contain non-empty notes_ar.")
+          if not isinstance(notes.get("notes_en"), list) or not notes["notes_en"]:
+              raise SystemExit("release_notes.json must contain non-empty notes_en.")
           manifest = {
               "latest_version": version,
               "download_url": "https://mahmoudaljuorany.store/" + apk_name,
@@ -335,9 +344,19 @@ jobs:
             -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
             'https://mahmoudaljuorany.store/version.json' -o "$RUNNER_TEMP/published-version.json"
           cmp "$RUNNER_TEMP/version.json" "$RUNNER_TEMP/published-version.json"
-          curl --fail --silent --show-error --head --max-redirs 0 --max-time 30 \
-            "https://mahmoudaljuorany.store/$APK_NAME" >/dev/null
-          echo "Published and HTTP-verified $RELEASE_VERSION ($APK_NAME), SHA-256 $EXPECTED_SHA256."
+          curl --fail --silent --show-error --max-redirs 0 --max-time 30 \
+            -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+            'https://mahmoudaljuorany.store/release_notes.json' -o "$RUNNER_TEMP/published-release-notes.json"
+          cmp release_notes.json "$RUNNER_TEMP/published-release-notes.json"
+          curl --fail --silent --show-error --max-redirs 0 --max-time 180 \
+            -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+            "https://mahmoudaljuorany.store/$APK_NAME" -o "$RUNNER_TEMP/published-release.apk"
+          PUBLISHED_SHA256="$(sha256sum "$RUNNER_TEMP/published-release.apk" | awk '{print $1}')"
+          test "$PUBLISHED_SHA256" = "$EXPECTED_SHA256" || {
+            echo "Server APK bytes do not match the signed build checksum."
+            exit 1
+          }
+          echo "Published and byte-verified $RELEASE_VERSION ($APK_NAME), SHA-256 $EXPECTED_SHA256."
 
       - name: Remove temporary signing material
         if: always()
