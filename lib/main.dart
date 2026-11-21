@@ -1174,7 +1174,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             // Restart safely instead of appending a duplicate full APK.
             existingBytes = 0;
             totalBytes = response.contentLength;
-            if (totalBytes != null && totalBytes! > maxApkBytes) {
+            if (totalBytes != null && totalBytes > maxApkBytes) {
               throw const _UpdateSizeLimitException();
             }
           } else {
