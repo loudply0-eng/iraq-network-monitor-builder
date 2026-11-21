@@ -888,16 +888,30 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       final uri = Uri.parse(
         'https://mahmoudaljuorany.store/release_notes.json',
       );
-      final response = await http.get(uri, headers: {'Cache-Control': 'no-cache'})
+      final response = await http
+          .get(uri, headers: {'Cache-Control': 'no-cache'})
           .timeout(const Duration(seconds: 12));
       if (response.statusCode != 200) return;
-      final data = jsonDecode(response.body);
-      if (data is! Map<String, dynamic> || data['version']?.toString() != version) return;
-      final notes = _readReleaseNotes(data['notes']);
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) return;
+
+      // Accept both the current release_notes.json schema and the older schema.
+      final releaseVersion =
+          (decoded['latest_version'] ?? decoded['version'])?.toString();
+      if (releaseVersion != version) return;
+
+      final english = AppPreferences.english.value;
+      final notesValue = english
+          ? (decoded['notes_en'] ?? decoded['notes'] ?? decoded['notes_ar'])
+          : (decoded['notes_ar'] ?? decoded['notes'] ?? decoded['notes_en']);
+      final notes = _readReleaseNotes(notesValue);
       if (notes.isNotEmpty) {
-        pendingReleaseTitle = data['title']?.toString().trim().isNotEmpty == true
-            ? data['title'].toString().trim()
-            : pendingReleaseTitle;
+        final titleValue = english
+            ? (decoded['title_en'] ?? decoded['title'])
+            : (decoded['title_ar'] ?? decoded['title']);
+        if (titleValue is String && titleValue.trim().isNotEmpty) {
+          pendingReleaseTitle = titleValue.trim();
+        }
         pendingReleaseNotes = notes;
       }
     } catch (_) {
