@@ -27,16 +27,21 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.security.MessageDigest
 
 class MainActivity : FlutterActivity() {
     @Suppress("DEPRECATION")
-    private fun signingCertificates(info: android.content.pm.PackageInfo): List<String> {
+    private fun signingCertificateSha256(info: android.content.pm.PackageInfo): List<String> {
         val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             info.signingInfo?.apkContentsSigners
         } else {
             info.signatures
         }
-        return signatures?.map { it.toCharsString() }?.sorted().orEmpty()
+        return signatures?.map { signature ->
+            MessageDigest.getInstance("SHA-256")
+                .digest(signature.toByteArray())
+                .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+        }?.sorted().orEmpty()
     }
     // OTA installer compatibility fix: validate package/version and grant content URI access.
     private val CHANNEL = "com.abrjiraq/tower"
@@ -681,10 +686,11 @@ class MainActivity : FlutterActivity() {
                         }
 
                         val installedInfo = packageManager.getPackageInfo(packageName, signingFlags)
-                        val apkSignatures = signingCertificates(archiveInfo)
-                        val installedSignatures = signingCertificates(installedInfo)
-                        if (apkSignatures.isEmpty() || installedSignatures.isEmpty() ||
-                            apkSignatures != installedSignatures
+                        val apkSignatures = signingCertificateSha256(archiveInfo)
+                        val installedSignatures = signingCertificateSha256(installedInfo)
+                        val approvedReleaseSignatures = listOf("f29ff0e87eabbe89ce0664727652e870eddca3acbfbfe9fab18505e0340b62b8")
+                        if (apkSignatures != approvedReleaseSignatures ||
+                            installedSignatures != approvedReleaseSignatures
                         ) {
                             result.error(
                                 "SIGNATURE_MISMATCH",
