@@ -76,7 +76,7 @@ jobs:
 
           manifest_url = "https://mahmoudaljuorany.store/version.json"
           version_text = Path("pubspec.yaml").read_text(encoding="utf-8")
-          match = re.search(r"^version:\\s*(\\d+\\.\\d+\\.\\d+)\\+(\\d+)\\s*$", version_text, re.M)
+          match = re.search(r"^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$", version_text, re.M)
           if not match:
               raise SystemExit("pubspec.yaml must contain version: x.y.z+build.")
           candidate_text = f"{match.group(1)}+{match.group(2)}"
@@ -105,18 +105,18 @@ jobs:
               raise SystemExit("Could not verify the published app version: " + str(error)) from error
 
           published_text = str(current.get("latest_version", "")).strip() if isinstance(current, dict) else ""
-          published_match = re.fullmatch(r"(\\d+)\\.(\\d+)\\.(\\d+)\\+(\\d+)", published_text)
+          published_match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)\+(\d+)", published_text)
           if not published_match:
               raise SystemExit("Published version.json has an invalid latest_version.")
           published = tuple(int(part) for part in published_match.groups())
           if candidate <= published:
               print(f"No release needed: source {candidate_text}, already published {published_text}.")
               with open(__import__("os").environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-                  output.write("should_release=false\\n")
+                  output.write("should_release=false\n")
           else:
               print(f"New release detected: {candidate_text} (published: {published_text}).")
               with open(__import__("os").environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-                  output.write("should_release=true\\n")
+                  output.write("should_release=true\n")
           PY
 
       - name: Prepare original release signing key
@@ -141,9 +141,9 @@ jobs:
           python3 - <<'PY'
           import os
           def escape(value):
-              value = value.replace("\\", "\\\\")
+              value = value.replace("\", "\\")
               for char in ("=", ":", "#", "!"):
-                  value = value.replace(char, "\\" + char)
+                  value = value.replace(char, "\" + char)
               return value
           values = {
               "storeFile": "upload-keystore.jks",
@@ -244,7 +244,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="$(sed -nE 's/^version: ([0-9]+\\.[0-9]+\\.[0-9]+\\+[0-9]+)$/\\1/p' pubspec.yaml)"
+          VERSION="$(sed -nE 's/^version: ([0-9]+\.[0-9]+\.[0-9]+\+[0-9]+)$/\1/p' pubspec.yaml)"
           test -n "$VERSION"
           APK_NAME="iraq-network-monitor-${VERSION/+/-}.apk"
           APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
@@ -255,9 +255,9 @@ jobs:
           import re
           import sys
           version, apk_name, digest, output_path = sys.argv[1:]
-          if not re.fullmatch(r"\\d+\\.\\d+\\.\\d+\\+\\d+", version):
+          if not re.fullmatch(r"\d+\.\d+\.\d+\+\d+", version):
               raise SystemExit("Invalid release version.")
-          if not re.fullmatch(r"iraq-network-monitor-[0-9]+\\.[0-9]+\\.[0-9]+-[0-9]+\\.apk", apk_name):
+          if not re.fullmatch(r"iraq-network-monitor-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.apk", apk_name):
               raise SystemExit("Invalid APK file name.")
           if not re.fullmatch(r"[a-f0-9]{64}", digest):
               raise SystemExit("Invalid APK SHA-256.")
@@ -269,7 +269,7 @@ jobs:
           }
           with open(output_path, "w", encoding="utf-8") as handle:
               json.dump(manifest, handle, ensure_ascii=False, indent=2)
-              handle.write("\\n")
+              handle.write("\n")
           PY
           echo "apk_name=$APK_NAME" >> "$GITHUB_OUTPUT"
           echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
@@ -303,12 +303,12 @@ jobs:
           [[ "$UPDATE_SFTP_USER" =~ ^[A-Za-z0-9._-]+$ ]]
           [[ "$UPDATE_SFTP_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]]
           [[ "$UPDATE_SFTP_PATH" != *".."* ]]
-          [[ "$APK_NAME" =~ ^iraq-network-monitor-[0-9]+\\.[0-9]+\\.[0-9]+-[0-9]+\\.apk$ ]]
+          [[ "$APK_NAME" =~ ^iraq-network-monitor-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.apk$ ]]
           [[ "$EXPECTED_SHA256" =~ ^[a-f0-9]{64}$ ]]
 
           install -d -m 700 "$HOME/.ssh"
-          printf '%s\\n' "$UPDATE_SFTP_PRIVATE_KEY" > "$HOME/.ssh/ota_deploy_key"
-          printf '%s\\n' "$UPDATE_SFTP_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          printf '%s\n' "$UPDATE_SFTP_PRIVATE_KEY" > "$HOME/.ssh/ota_deploy_key"
+          printf '%s\n' "$UPDATE_SFTP_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/ota_deploy_key" "$HOME/.ssh/known_hosts"
           ssh-keygen -lf "$HOME/.ssh/known_hosts" >/dev/null
 
@@ -322,20 +322,20 @@ jobs:
           SFTP
 
           COMMON_SSH_OPTS=(-p "$UPDATE_SFTP_PORT" -i "$HOME/.ssh/ota_deploy_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" -o ConnectTimeout=20)
-          sftp -b "$RUNNER_TEMP/ota_publish.sftp" -P "$UPDATE_SFTP_PORT" -i "$HOME/.ssh/ota_deploy_key" \\
-            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \\
-            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" -o ConnectTimeout=20 \\
+          sftp -b "$RUNNER_TEMP/ota_publish.sftp" -P "$UPDATE_SFTP_PORT" -i "$HOME/.ssh/ota_deploy_key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" -o ConnectTimeout=20 \
             "$UPDATE_SFTP_USER@$UPDATE_SFTP_HOST"
 
           # Rename files on the same remote filesystem; publish version.json last.
-          ssh "${COMMON_SSH_OPTS[@]}" "$UPDATE_SFTP_USER@$UPDATE_SFTP_HOST" \\
+          ssh "${COMMON_SSH_OPTS[@]}" "$UPDATE_SFTP_USER@$UPDATE_SFTP_HOST" \
             "set -eu; mv -f -- '$UPDATE_SFTP_PATH/$APK_TMP' '$UPDATE_SFTP_PATH/$APK_NAME'; mv -f -- '$UPDATE_SFTP_PATH/$NOTES_TMP' '$UPDATE_SFTP_PATH/release_notes.json'; mv -f -- '$UPDATE_SFTP_PATH/$VERSION_TMP' '$UPDATE_SFTP_PATH/version.json'"
 
-          curl --fail --silent --show-error --max-redirs 0 --max-time 30 \\
-            -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \\
+          curl --fail --silent --show-error --max-redirs 0 --max-time 30 \
+            -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
             'https://mahmoudaljuorany.store/version.json' -o "$RUNNER_TEMP/published-version.json"
           cmp "$RUNNER_TEMP/version.json" "$RUNNER_TEMP/published-version.json"
-          curl --fail --silent --show-error --head --max-redirs 0 --max-time 30 \\
+          curl --fail --silent --show-error --head --max-redirs 0 --max-time 30 \
             "https://mahmoudaljuorany.store/$APK_NAME" >/dev/null
           echo "Published and HTTP-verified $RELEASE_VERSION ($APK_NAME), SHA-256 $EXPECTED_SHA256."
 
