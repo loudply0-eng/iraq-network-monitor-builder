@@ -124,7 +124,7 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: flutter build apk --release --verbose
+        run: flutter build apk --release --obfuscate --split-debug-info=build/symbols/1.0.22+25 --verbose
 
       - name: Build unsigned debug APK for pull requests
         if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main'
