@@ -940,14 +940,43 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   Future<void> _loadReleaseNotes(String version) async {
     try {
-      final uri = Uri.parse(
-        'https://mahmoudaljuorany.store/release_notes.json',
+      final uri = Uri.https(
+        'mahmoudaljuorany.store',
+        '/release_notes.json',
       );
-      final response = await http
-          .get(uri, headers: {'Cache-Control': 'no-cache'})
-          .timeout(const Duration(seconds: 12));
-      if (response.statusCode != 200) return;
-      final decoded = jsonDecode(response.body);
+      const maxReleaseNotesBytes = 64 * 1024;
+      final client = http.Client();
+      late final List<int> responseBytes;
+      try {
+        final request = http.Request('GET', uri)
+          ..followRedirects = false
+          ..maxRedirects = 0
+          ..headers['Cache-Control'] = 'no-cache'
+          ..headers['Accept-Encoding'] = 'identity';
+        final response = await client
+            .send(request)
+            .timeout(const Duration(seconds: 12));
+        if (response.statusCode != 200 || response.request?.url != uri) return;
+        final declaredLength = response.contentLength;
+        if (declaredLength != null &&
+            declaredLength > maxReleaseNotesBytes) {
+          return;
+        }
+
+        final receivedBytes = <int>[];
+        await for (final chunk in response.stream
+            .timeout(const Duration(seconds: 12))) {
+          if (receivedBytes.length + chunk.length > maxReleaseNotesBytes) {
+            return;
+          }
+          receivedBytes.addAll(chunk);
+        }
+        responseBytes = receivedBytes;
+      } finally {
+        client.close();
+      }
+
+      final decoded = jsonDecode(utf8.decode(responseBytes));
       if (decoded is! Map<String, dynamic>) return;
 
       // Accept both the current release_notes.json schema and the older schema.
