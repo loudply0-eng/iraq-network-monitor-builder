@@ -1,6 +1,20 @@
 {
-  "latest_version": "1.0.25+28",
+  "latest_version": "1.0.26+29",
   "releases": [
+    {
+      "version": "1.0.26+29",
+      "date": "2026-11-22",
+      "notes_ar": [
+        "إصلاح عرض زر تحديث التطبيق داخل الإعدادات على الشاشات الصغيرة.",
+        "جعل نافذة الإعدادات قابلة للتمرير حتى تبقى جميع الخيارات وأزرار التحديث متاحة.",
+        "توضيح اسم زر فحص التحديثات."
+      ],
+      "notes_en": [
+        "Fix the app update action visibility in settings on smaller screens.",
+        "Make the settings sheet scrollable so all options and update actions remain accessible.",
+        "Clarify the update-check button label."
+      ]
+    },
     {
       "version": "1.0.25+28",
       "date": "2026-11-22",
