@@ -1,4 +1,5 @@
-# Require the repository owner to review security-sensitive application changes.
+# Assign the repository owner as code owner for security-sensitive changes.
+# CODEOWNER approval is not enforced while this repository has a single maintainer.
 /.github/workflows/ @loudply0-eng
 /.github/dependabot.yml @loudply0-eng
 /android/app/build.gradle.kts @loudply0-eng
