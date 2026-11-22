@@ -26,4 +26,4 @@ If GitHub Private Vulnerability Reporting is enabled for this repository, use th
 
 ## Maintainer checklist
 
-Before merging security-sensitive changes, review workflow permissions, third-party Actions, dependency changes, signing configuration, manifest validation, and server publication behavior. Keep the default branch protected with required pull-request reviews and successful CI checks, and disallow force pushes and branch deletion.
+Before merging security-sensitive changes, review workflow permissions, third-party Actions, dependency changes, signing configuration, manifest validation, and server publication behavior. Keep the default branch protected so changes require a pull request and successful CI checks; also require an independent approval when a trusted second maintainer is available. For this single-maintainer repository, review the complete diff and passing CI results yourself before merging. Continue to disallow force pushes and branch deletion.
