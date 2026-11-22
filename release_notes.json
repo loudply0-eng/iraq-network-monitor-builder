@@ -1,13 +1,15 @@
 {
-  "latest_version": "1.0.24+27",
+  "latest_version": "1.0.25+28",
   "notes_ar": [
-    "تفعيل نظام التحديث الآمن المنفصل الخاص بمراقب شبكات العراق.",
-    "التحقق من توقيع Ed25519 وبصمة SHA-256 قبل اعتماد أي تحديث.",
-    "تحسين توافق التحديثات مع الإصدارات السابقة والحفاظ على هوية التطبيق."
+    "إضافة زر حول التطبيق لشرح وظيفة مراقب شبكات العراق وأقسامه وأدواته.",
+    "إضافة سجل تغييرات يعرض الإضافات والتحسينات لكل إصدار.",
+    "إصلاح التحقق النهائي من توقيع Ed25519 بعد تنزيل ملف التوقيع بصيغة Base64.",
+    "نشر سجل التغييرات على مسار مستقل خاص بالتطبيق."
   ],
   "notes_en": [
-    "Enable the dedicated secure update channel for Iraq Network Monitor.",
-    "Verify Ed25519 signatures and SHA-256 before accepting an update.",
-    "Improve update compatibility with previous versions while preserving app identity."
+    "Add an About page explaining Iraq Network Monitor and its tools.",
+    "Add a version history showing features and improvements for each release.",
+    "Fix final Ed25519 signature verification after decoding the Base64 signature.",
+    "Publish the change history on a dedicated app-specific endpoint."
   ]
 }
