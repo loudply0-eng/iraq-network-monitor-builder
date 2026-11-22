@@ -283,7 +283,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
           child: loading
               ? const Center(child: CircularProgressIndicator())
               : loadError != null
-                  ? Text(loadError ?? '')
+                  ? Text(loadError)
                   : releases.isEmpty
                       ? Text(tr('لا توجد تغييرات مسجلة بعد.', 'No changes have been recorded yet.'))
                       : ListView.separated(
