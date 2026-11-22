@@ -450,9 +450,12 @@ jobs:
             -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
             'https://mahmoudaljuorany.store/updates/iraq-network-monitor/version.json.sig' -o "$RUNNER_TEMP/published-version.json.sig"
           cmp "$RUNNER_TEMP/monitor-update/version.json.sig" "$RUNNER_TEMP/published-version.json.sig"
+          # The manifest signature is published as base64 text; OpenSSL requires raw Ed25519 bytes.
+          base64 --decode "$RUNNER_TEMP/published-version.json.sig" > "$RUNNER_TEMP/published-version.sig.bin"
+          test "$(wc -c < "$RUNNER_TEMP/published-version.sig.bin")" -eq 64
           openssl pkeyutl -verify -rawin -pubin \
             -inkey "$RUNNER_TEMP/monitor-update-public.pem" \
-            -sigfile "$RUNNER_TEMP/published-version.json.sig" \
+            -sigfile "$RUNNER_TEMP/published-version.sig.bin" \
             -in "$RUNNER_TEMP/published-version.json"
 
           for url in \
