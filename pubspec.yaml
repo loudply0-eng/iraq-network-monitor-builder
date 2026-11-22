@@ -1,7 +1,7 @@
 name: abrj_iraq
 description: "Iraq Network Monitor - مراقب شبكات العراق"
 publish_to: 'none'
-version: 1.0.22+25
+version: 1.0.23+26
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -14,6 +14,7 @@ dependencies:
   latlong2: 0.9.0
   http: ^1.2.2
   crypto: ^3.0.8
+  cryptography: ^2.9.0
   path_provider: ^2.1.5
   ota_update: ^7.1.0
   package_info_plus: ^8.0.1
