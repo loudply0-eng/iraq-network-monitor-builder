@@ -73,7 +73,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export FORCE_RELEASE="${{ github.event.inputs.force_publish || 'false' }}"
+          export FORCE_RELEASE="${{ github.event.inputs.force_publish || contains(github.event.head_commit.message || '', '[repair-publish]') }}"
           python3 - <<'PY'
           import json
           import re
