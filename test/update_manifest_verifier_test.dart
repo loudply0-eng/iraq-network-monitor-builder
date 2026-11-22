@@ -67,3 +67,60 @@ void main() {
     );
   });
 }
+
+  test('rejects an empty manifest and an oversized manifest', () async {
+    final validSignature = await Ed25519().sign(<int>[1], keyPair: keyPair);
+
+    expect(
+      () => UpdateManifestVerifier.verify(
+        manifestBytes: <int>[],
+        signatureBase64: base64Encode(validSignature.bytes),
+        publicKeyBase64: publicKeyBase64,
+      ),
+      throwsA(isA<FormatException>()),
+    );
+
+    expect(
+      () => UpdateManifestVerifier.verify(
+        manifestBytes: List<int>.filled(
+          UpdateManifestVerifier.maxManifestBytes + 1,
+          0,
+        ),
+        signatureBase64: base64Encode(validSignature.bytes),
+        publicKeyBase64: publicKeyBase64,
+      ),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
+  test('rejects a valid signature from a different signing key', () async {
+    final otherKeyPair = await Ed25519().newKeyPair();
+    final payload = utf8.encode(
+      '{"latest_version":"1.0.26+29","application_id":"com.example.abrj_iraq"}',
+    );
+    final signature = await Ed25519().sign(payload, keyPair: otherKeyPair);
+
+    expect(
+      () => UpdateManifestVerifier.verify(
+        manifestBytes: payload,
+        signatureBase64: base64Encode(signature.bytes),
+        publicKeyBase64: publicKeyBase64,
+      ),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
+  test('rejects correctly signed bytes that are not a JSON object', () async {
+    final payload = utf8.encode('["not","an","object"]');
+    final signature = await Ed25519().sign(payload, keyPair: keyPair);
+
+    expect(
+      () => UpdateManifestVerifier.verify(
+        manifestBytes: payload,
+        signatureBase64: base64Encode(signature.bytes),
+        publicKeyBase64: publicKeyBase64,
+      ),
+      throwsA(isA<FormatException>()),
+    );
+  });
+}
