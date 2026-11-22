@@ -190,6 +190,137 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   bool get isEnglish => AppPreferences.english.value;
   String tr(String ar, String en) => isEnglish ? en : ar;
 
+  Future<void> showAboutDialog() async {
+    final info = await PackageInfo.fromPlatform();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Row(children: [
+          const Icon(Icons.cell_tower, color: Color(0xFF16BCEB)),
+          const SizedBox(width: 10),
+          Expanded(child: Text(tr('حول مراقب شبكات العراق', 'About Iraq Network Monitor'))),
+        ]),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(tr(
+                'تطبيق لمراقبة وتحليل شبكات الهاتف المحمول والواي فاي ومساعدة المستخدم على فهم جودة الاتصال وتوثيق القياسات ميدانياً.',
+                'An app for monitoring and analyzing mobile and Wi-Fi networks, understanding connection quality, and recording field measurements.',
+              )),
+              const SizedBox(height: 14),
+              Text(tr('أهم الوظائف', 'Main features'), style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              _aboutFeature(Icons.map_outlined, tr('خريطة وموقع قراءات الشبكة والأبراج المتاحة', 'Map and location of network readings and available towers')),
+              _aboutFeature(Icons.signal_cellular_alt, tr('قراءات الإشارة مثل RSRP وRSRQ وRSSI وSINR حسب دعم الجهاز', 'Signal metrics such as RSRP, RSRQ, RSSI and SINR when supported by the device')),
+              _aboutFeature(Icons.wifi, tr('فحص شبكات Wi-Fi القريبة ومعلوماتها المتاحة', 'Scan nearby Wi-Fi networks and available details')),
+              _aboutFeature(Icons.history, tr('حفظ سجل القراءات ومراجعة القياسات السابقة', 'Save signal history and review previous measurements')),
+              _aboutFeature(Icons.route, tr('أدوات القياس الميداني وحساب القنوات وفقد المسار', 'Field-testing tools, channel calculations and path loss')),
+              _aboutFeature(Icons.notifications_active_outlined, tr('تنبيهات تغيّر الشبكة وضعف الإشارة أثناء تشغيل التطبيق', 'Network-change and weak-signal alerts while the app is running')),
+              _aboutFeature(Icons.system_update_alt, tr('تحديثات موقّعة مع التحقق من سلامة ملف التحديث', 'Signed updates with package integrity verification')),
+              const SizedBox(height: 12),
+              Text(tr('ملاحظة: البيانات والقراءات تعتمد على صلاحيات أندرويد وموديل الهاتف وشركة الاتصالات؛ لذلك قد لا تتوفر كل المؤشرات على جميع الأجهزة.',
+                  'Note: readings depend on Android permissions, phone model and carrier. Not every metric is available on every device.'),
+                style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: 12),
+              Text('${tr('الإصدار', 'Version')}: ${info.version}+${info.buildNumber}',
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+              Text('© 2026 Iraq Network Monitor', style: Theme.of(context).textTheme.bodySmall),
+            ],
+          ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(tr('إغلاق', 'Close')))],
+      ),
+    );
+  }
+
+  Widget _aboutFeature(IconData icon, String text) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Icon(icon, size: 18, color: Theme.of(context).colorScheme.primary),
+      const SizedBox(width: 9),
+      Expanded(child: Text(text)),
+    ]),
+  );
+
+  Future<void> showChangelogDialog() async {
+    List<Map<String, dynamic>> releases = <Map<String, dynamic>>[];
+    var loading = true;
+    String? loadError;
+    try {
+      final response = await http.get(
+        Uri.parse('https://mahmoudaljuorany.store/updates/iraq-network-monitor/changelog.json'),
+        headers: const {'Cache-Control': 'no-cache', 'Pragma': 'no-cache'},
+      ).timeout(const Duration(seconds: 12));
+      if (response.statusCode != 200) throw Exception('HTTP ${response.statusCode}');
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map || decoded['releases'] is! List) {
+        throw const FormatException('Invalid changelog format');
+      }
+      releases = (decoded['releases'] as List)
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+      loading = false;
+    } catch (_) {
+      loading = false;
+      loadError = tr('تعذّر تحميل سجل التغييرات حالياً. جرّب مرة أخرى عند توفر الإنترنت.',
+          'Could not load the change history. Please try again when internet is available.');
+    }
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Row(children: [
+          const Icon(Icons.history, color: Color(0xFF16BCEB)),
+          const SizedBox(width: 10),
+          Expanded(child: Text(tr('سجل التغييرات', 'What’s new'))),
+        ]),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: loading
+              ? const Center(child: CircularProgressIndicator())
+              : loadError != null
+                  ? Text(loadError!)
+                  : releases.isEmpty
+                      ? Text(tr('لا توجد تغييرات مسجلة بعد.', 'No changes have been recorded yet.'))
+                      : ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: releases.length,
+                          separatorBuilder: (_, __) => const Divider(),
+                          itemBuilder: (_, index) {
+                            final release = releases[index];
+                            final notesKey = isEnglish ? 'notes_en' : 'notes_ar';
+                            final notes = release[notesKey] is List
+                                ? (release[notesKey] as List).map((item) => item.toString()).toList()
+                                : <String>[];
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('${tr('الإصدار', 'Version')} ${release['version'] ?? '—'}',
+                                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                                if ((release['date'] ?? '').toString().isNotEmpty)
+                                  Text(release['date'].toString(), style: Theme.of(context).textTheme.bodySmall),
+                                const SizedBox(height: 6),
+                                ...notes.map((note) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 5),
+                                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                    const Text('•  '),
+                                    Expanded(child: Text(note)),
+                                  ]),
+                                )),
+                              ],
+                            );
+                          },
+                        ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(tr('إغلاق', 'Close')))],
+      ),
+    );
+  }
+
   Future<void> showSettings() async {
     await showModalBottomSheet<void>(
       context: context,
@@ -306,6 +437,21 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                     await AppPreferences.setNetworkAlertsEnabled(value);
                   },
                 ),
+              ),
+              const SizedBox(height: 8),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.info_outline, color: Theme.of(context).colorScheme.primary),
+                title: Text(english ? 'About the app' : 'حول التطبيق'),
+                subtitle: Text(english ? 'What the app does and how to use its tools' : 'شرح التطبيق وأقسامه وطريقة استخدامه'),
+                onTap: () { Navigator.of(sheetContext).pop(); showAboutDialog(); },
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.history, color: Theme.of(context).colorScheme.primary),
+                title: Text(english ? 'Change history' : 'سجل التغييرات'),
+                subtitle: Text(english ? 'Features and fixes in each version' : 'الإضافات والتحسينات في كل إصدار'),
+                onTap: () { Navigator.of(sheetContext).pop(); showChangelogDialog(); },
               ),
               const SizedBox(height: 10),
               ElevatedButton.icon(
