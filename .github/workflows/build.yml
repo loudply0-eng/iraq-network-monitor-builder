@@ -407,6 +407,7 @@ jobs:
           NOTES_TMP=".release_notes.json.tmp-$GITHUB_RUN_ID"
           VERSION_TMP=".version.json.tmp-$GITHUB_RUN_ID"
           SIGNATURE_TMP=".version.json.sig.tmp-$GITHUB_RUN_ID"
+          CHANGELOG_TMP=".changelog.json.tmp-$GITHUB_RUN_ID"
           MONITOR_DIR="$UPDATE_SFTP_PATH/iraq-network-monitor"
           [[ "$UPDATE_SFTP_PATH" == "/incoming" ]] || { echo "UPDATE_SFTP_PATH must be /incoming for the isolated account."; exit 1; }
 
@@ -417,6 +418,8 @@ jobs:
           put build/app/outputs/flutter-apk/app-release.apk "$MONITOR_DIR/$APK_TMP"
           put release_notes.json "$UPDATE_SFTP_PATH/$NOTES_TMP"
           put release_notes.json "$MONITOR_DIR/$NOTES_TMP"
+          put changelog.json "$UPDATE_SFTP_PATH/$CHANGELOG_TMP"
+          put changelog.json "$MONITOR_DIR/$CHANGELOG_TMP"
           put "$RUNNER_TEMP/version.json" "$UPDATE_SFTP_PATH/$VERSION_TMP"
           put "$RUNNER_TEMP/monitor-update/version.json" "$MONITOR_DIR/$VERSION_TMP"
           put "$RUNNER_TEMP/monitor-update/version.json.sig" "$MONITOR_DIR/$SIGNATURE_TMP"
@@ -424,6 +427,8 @@ jobs:
           rename "$MONITOR_DIR/$APK_TMP" "$MONITOR_DIR/$APK_NAME"
           rename "$UPDATE_SFTP_PATH/$NOTES_TMP" "$UPDATE_SFTP_PATH/release_notes.json"
           rename "$MONITOR_DIR/$NOTES_TMP" "$MONITOR_DIR/release_notes.json"
+          rename "$UPDATE_SFTP_PATH/$CHANGELOG_TMP" "$UPDATE_SFTP_PATH/changelog.json"
+          rename "$MONITOR_DIR/$CHANGELOG_TMP" "$MONITOR_DIR/changelog.json"
           rename "$MONITOR_DIR/$SIGNATURE_TMP" "$MONITOR_DIR/version.json.sig"
           rename "$UPDATE_SFTP_PATH/$VERSION_TMP" "$UPDATE_SFTP_PATH/version.json"
           rename "$MONITOR_DIR/$VERSION_TMP" "$MONITOR_DIR/version.json"
@@ -450,9 +455,12 @@ jobs:
             -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
             'https://mahmoudaljuorany.store/updates/iraq-network-monitor/version.json.sig' -o "$RUNNER_TEMP/published-version.json.sig"
           cmp "$RUNNER_TEMP/monitor-update/version.json.sig" "$RUNNER_TEMP/published-version.json.sig"
+          # The server stores the signature as base64 text; OpenSSL verifies the 64-byte raw Ed25519 signature.
+          base64 --decode "$RUNNER_TEMP/published-version.json.sig" > "$RUNNER_TEMP/published-version.sig.bin"
+          test "$(wc -c < "$RUNNER_TEMP/published-version.sig.bin")" -eq 64
           openssl pkeyutl -verify -rawin -pubin \
             -inkey "$RUNNER_TEMP/monitor-update-public.pem" \
-            -sigfile "$RUNNER_TEMP/published-version.json.sig" \
+            -sigfile "$RUNNER_TEMP/published-version.sig.bin" \
             -in "$RUNNER_TEMP/published-version.json"
 
           for url in \
@@ -462,6 +470,15 @@ jobs:
               -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "$url" \
               -o "$RUNNER_TEMP/published-release-notes.json"
             cmp release_notes.json "$RUNNER_TEMP/published-release-notes.json"
+          done
+
+          for url in \
+            'https://mahmoudaljuorany.store/changelog.json' \
+            'https://mahmoudaljuorany.store/updates/iraq-network-monitor/changelog.json'; do
+            curl --fail --silent --show-error --max-redirs 0 --max-time 30 \
+              -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "$url" \
+              -o "$RUNNER_TEMP/published-changelog.json"
+            cmp changelog.json "$RUNNER_TEMP/published-changelog.json"
           done
 
           for url in \
