@@ -54,6 +54,13 @@ app.*.map.json
 *.jks
 *.keystore
 *.p12
+*.pfx
+*.pem
+*.key
+*.ppk
+id_rsa
+id_ecdsa
+id_ed25519
 .env
 .env.*
 !.env.example
