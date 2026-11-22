@@ -1,0 +1,21 @@
+{
+  "latest_version": "1.0.24+27",
+  "releases": [
+    {
+      "version": "1.0.24+27",
+      "date": "2026-11-22",
+      "notes_ar": [
+        "تفعيل قناة التحديث الآمن المنفصلة لمراقب شبكات العراق.",
+        "التحقق من توقيع Ed25519 وبصمة SHA-256 قبل قبول أي تحديث.",
+        "تحسين توافق التحديثات مع الإصدارات السابقة والحفاظ على هوية التطبيق.",
+        "إضافة صفحة حول التطبيق وسجل تغييرات الإصدارات."
+      ],
+      "notes_en": [
+        "Enable the dedicated secure update channel for Iraq Network Monitor.",
+        "Verify Ed25519 signatures and SHA-256 before accepting updates.",
+        "Improve update compatibility while preserving the app identity.",
+        "Add the About page and version change history."
+      ]
+    }
+  ]
+}
