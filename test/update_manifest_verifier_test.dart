@@ -66,7 +66,6 @@ void main() {
       throwsA(isA<FormatException>()),
     );
   });
-}
 
   test('rejects an empty manifest and an oversized manifest', () async {
     final validSignature = await Ed25519().sign(<int>[1], keyPair: keyPair);
