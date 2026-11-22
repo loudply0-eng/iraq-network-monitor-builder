@@ -192,13 +192,34 @@ jobs:
           echo "Original production signing certificate verified."
           rm -f "$OUTPUT_FILE"
 
+      - name: Validate the dedicated OTA signing key
+        if: steps.release_gate.outputs.should_release == 'true'
+        shell: bash
+        env:
+          MONITOR_UPDATE_PRIVATE_KEY_PEM: ${{ secrets.MONITOR_UPDATE_PRIVATE_KEY_PEM }}
+          MONITOR_UPDATE_PUBLIC_KEY_BASE64: ${{ vars.MONITOR_UPDATE_PUBLIC_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          test -n "$MONITOR_UPDATE_PRIVATE_KEY_PEM" || { echo "Missing MONITOR_UPDATE_PRIVATE_KEY_PEM"; exit 1; }
+          test -n "$MONITOR_UPDATE_PUBLIC_KEY_BASE64" || { echo "Missing MONITOR_UPDATE_PUBLIC_KEY_BASE64 repository variable"; exit 1; }
+          umask 077
+          printf '%s\n' "$MONITOR_UPDATE_PRIVATE_KEY_PEM" > "$RUNNER_TEMP/monitor-update-private.pem"
+          openssl pkey -in "$RUNNER_TEMP/monitor-update-private.pem" -pubout -out "$RUNNER_TEMP/monitor-update-public.pem"
+          DER_PUBLIC="$(openssl pkey -in "$RUNNER_TEMP/monitor-update-private.pem" -pubout -outform DER 2>/dev/null | tail -c 32 | base64 -w0)"
+          test "$DER_PUBLIC" = "$MONITOR_UPDATE_PUBLIC_KEY_BASE64" || {
+            echo "OTA private key does not match MONITOR_UPDATE_PUBLIC_KEY_BASE64."
+            exit 1
+          }
+          chmod 600 "$RUNNER_TEMP/monitor-update-private.pem" "$RUNNER_TEMP/monitor-update-public.pem"
+
       - name: Build signed release APK (trusted main only)
         if: steps.release_gate.outputs.should_release == 'true'
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: flutter build apk --release --obfuscate --split-debug-info=build/symbols/${GITHUB_RUN_ID} --verbose
+          MONITOR_UPDATE_PUBLIC_KEY_BASE64: ${{ vars.MONITOR_UPDATE_PUBLIC_KEY_BASE64 }}
+        run: flutter build apk --release --obfuscate --split-debug-info=build/symbols/${GITHUB_RUN_ID} --dart-define=MONITOR_UPDATE_PUBLIC_KEY_BASE64="$MONITOR_UPDATE_PUBLIC_KEY_BASE64" --verbose
 
       - name: Build unsigned debug APK for pull requests
         if: github.event_name == 'pull_request'
@@ -238,7 +259,7 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
-      - name: Prepare version manifest for automatic server publication
+      - name: Prepare isolated and legacy-compatible manifests
         if: steps.release_gate.outputs.should_release == 'true'
         id: publish_metadata
         shell: bash
@@ -250,11 +271,12 @@ jobs:
           APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
           test -s "$APK_PATH"
           SHA256="$(sha256sum "$APK_PATH" | awk '{print $1}')"
-          python3 - "$VERSION" "$APK_NAME" "$SHA256" "$RUNNER_TEMP/version.json" release_notes.json <<'PY'
+          mkdir -p "$RUNNER_TEMP/monitor-update"
+          python3 - "$VERSION" "$APK_NAME" "$SHA256" "$RUNNER_TEMP" release_notes.json <<'PY'
           import json
           import re
           import sys
-          version, apk_name, digest, output_path, notes_path = sys.argv[1:]
+          version, apk_name, digest, runner_temp, notes_path = sys.argv[1:]
           if not re.fullmatch(r"\d+\.\d+\.\d+\+\d+", version):
               raise SystemExit("Invalid release version.")
           if not re.fullmatch(r"iraq-network-monitor-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.apk", apk_name):
@@ -263,26 +285,57 @@ jobs:
               raise SystemExit("Invalid APK SHA-256.")
           with open(notes_path, encoding="utf-8") as handle:
               notes = json.load(handle)
-          notes_version = str(notes.get("latest_version", notes.get("version", ""))).strip()
+          notes_version = str(notes.get("latest_version", "")).strip()
           if notes_version != version:
               raise SystemExit(f"release_notes.json version {notes_version!r} does not match app version {version!r}.")
           if not isinstance(notes.get("notes_ar"), list) or not notes["notes_ar"]:
               raise SystemExit("release_notes.json must contain non-empty notes_ar.")
           if not isinstance(notes.get("notes_en"), list) or not notes["notes_en"]:
               raise SystemExit("release_notes.json must contain non-empty notes_en.")
-          manifest = {
+
+          common = {
               "latest_version": version,
-              "download_url": "https://mahmoudaljuorany.store/" + apk_name,
               "sha256": digest,
               "release_title": "تحديث مراقب شبكات العراق",
           }
-          with open(output_path, "w", encoding="utf-8") as handle:
-              json.dump(manifest, handle, ensure_ascii=False, indent=2)
+          # Legacy manifest lets installed pre-signature builds migrate once.
+          legacy = {
+              **common,
+              "download_url": "https://mahmoudaljuorany.store/" + apk_name,
+          }
+          signed = {
+              **common,
+              "download_url": "https://mahmoudaljuorany.store/updates/iraq-network-monitor/" + apk_name,
+              "application_id": "com.example.abrj_iraq",
+              "platform": "android",
+              "release_notes": notes["notes_ar"],
+          }
+          with open(runner_temp + "/version.json", "w", encoding="utf-8") as handle:
+              json.dump(legacy, handle, ensure_ascii=False, indent=2)
+              handle.write("\n")
+          with open(runner_temp + "/monitor-update/version.json", "w", encoding="utf-8") as handle:
+              json.dump(signed, handle, ensure_ascii=False, indent=2)
               handle.write("\n")
           PY
           echo "apk_name=$APK_NAME" >> "$GITHUB_OUTPUT"
           echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sign isolated update manifest with Ed25519
+        if: steps.release_gate.outputs.should_release == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          openssl pkeyutl -sign -rawin \
+            -inkey "$RUNNER_TEMP/monitor-update-private.pem" \
+            -in "$RUNNER_TEMP/monitor-update/version.json" \
+            -out "$RUNNER_TEMP/monitor-update/version.sig.bin"
+          base64 -w0 "$RUNNER_TEMP/monitor-update/version.sig.bin" > "$RUNNER_TEMP/monitor-update/version.json.sig"
+          openssl pkeyutl -verify -rawin -pubin \
+            -inkey "$RUNNER_TEMP/monitor-update-public.pem" \
+            -sigfile "$RUNNER_TEMP/monitor-update/version.sig.bin" \
+            -in "$RUNNER_TEMP/monitor-update/version.json"
+          test "$(wc -c < "$RUNNER_TEMP/monitor-update/version.json.sig")" -eq 88
 
       - name: Check whether secure SFTP publishing is configured
         if: steps.release_gate.outputs.should_release == 'true'
@@ -350,21 +403,34 @@ jobs:
           ssh-keygen -lf "$HOME/.ssh/known_hosts" >/dev/null
 
           APK_TMP=".$APK_NAME.tmp-$GITHUB_RUN_ID"
+          LEGACY_APK_TMP=".legacy-$APK_NAME.tmp-$GITHUB_RUN_ID"
           NOTES_TMP=".release_notes.json.tmp-$GITHUB_RUN_ID"
           VERSION_TMP=".version.json.tmp-$GITHUB_RUN_ID"
+          SIGNATURE_TMP=".version.json.sig.tmp-$GITHUB_RUN_ID"
+          MONITOR_DIR="$UPDATE_SFTP_PATH/iraq-network-monitor"
           [[ "$UPDATE_SFTP_PATH" == "/incoming" ]] || { echo "UPDATE_SFTP_PATH must be /incoming for the isolated account."; exit 1; }
 
           cat > "$RUNNER_TEMP/ota_publish.sftp" <<SFTP
-          put build/app/outputs/flutter-apk/app-release.apk "$UPDATE_SFTP_PATH/$APK_TMP"
+          -mkdir "$MONITOR_DIR"
+          -chmod 2750 "$MONITOR_DIR"
+          put build/app/outputs/flutter-apk/app-release.apk "$UPDATE_SFTP_PATH/$LEGACY_APK_TMP"
+          put build/app/outputs/flutter-apk/app-release.apk "$MONITOR_DIR/$APK_TMP"
           put release_notes.json "$UPDATE_SFTP_PATH/$NOTES_TMP"
+          put release_notes.json "$MONITOR_DIR/$NOTES_TMP"
           put "$RUNNER_TEMP/version.json" "$UPDATE_SFTP_PATH/$VERSION_TMP"
-          rename "$UPDATE_SFTP_PATH/$APK_TMP" "$UPDATE_SFTP_PATH/$APK_NAME"
+          put "$RUNNER_TEMP/monitor-update/version.json" "$MONITOR_DIR/$VERSION_TMP"
+          put "$RUNNER_TEMP/monitor-update/version.json.sig" "$MONITOR_DIR/$SIGNATURE_TMP"
+          rename "$UPDATE_SFTP_PATH/$LEGACY_APK_TMP" "$UPDATE_SFTP_PATH/$APK_NAME"
+          rename "$MONITOR_DIR/$APK_TMP" "$MONITOR_DIR/$APK_NAME"
           rename "$UPDATE_SFTP_PATH/$NOTES_TMP" "$UPDATE_SFTP_PATH/release_notes.json"
+          rename "$MONITOR_DIR/$NOTES_TMP" "$MONITOR_DIR/release_notes.json"
+          rename "$MONITOR_DIR/$SIGNATURE_TMP" "$MONITOR_DIR/version.json.sig"
           rename "$UPDATE_SFTP_PATH/$VERSION_TMP" "$UPDATE_SFTP_PATH/version.json"
+          rename "$MONITOR_DIR/$VERSION_TMP" "$MONITOR_DIR/version.json"
           SFTP
 
-          # Publish exclusively through the chrooted SFTP account. The OpenSSH
-          # SFTP rename extension gives POSIX replacement semantics; manifest last.
+          # Keep the root manifest temporarily for installed pre-signature builds.
+          # New versions only read the signed app-specific path below.
           sftp -b "$RUNNER_TEMP/ota_publish.sftp" -P "$UPDATE_SFTP_PORT" -i "$HOME/.ssh/ota_deploy_key" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" -o ConnectTimeout=20 \
@@ -372,22 +438,46 @@ jobs:
 
           curl --fail --silent --show-error --max-redirs 0 --max-time 30 \
             -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
-            'https://mahmoudaljuorany.store/version.json' -o "$RUNNER_TEMP/published-version.json"
-          cmp "$RUNNER_TEMP/version.json" "$RUNNER_TEMP/published-version.json"
+            'https://mahmoudaljuorany.store/version.json' -o "$RUNNER_TEMP/published-legacy-version.json"
+          cmp "$RUNNER_TEMP/version.json" "$RUNNER_TEMP/published-legacy-version.json"
+
           curl --fail --silent --show-error --max-redirs 0 --max-time 30 \
             -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
-            'https://mahmoudaljuorany.store/release_notes.json' -o "$RUNNER_TEMP/published-release-notes.json"
-          cmp release_notes.json "$RUNNER_TEMP/published-release-notes.json"
-          curl --fail --silent --show-error --max-redirs 0 --max-time 180 \
+            'https://mahmoudaljuorany.store/updates/iraq-network-monitor/version.json' -o "$RUNNER_TEMP/published-version.json"
+          cmp "$RUNNER_TEMP/monitor-update/version.json" "$RUNNER_TEMP/published-version.json"
+
+          curl --fail --silent --show-error --max-redirs 0 --max-time 30 \
             -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
-            "https://mahmoudaljuorany.store/$APK_NAME" -o "$RUNNER_TEMP/published-release.apk"
-          PUBLISHED_SHA256="$(sha256sum "$RUNNER_TEMP/published-release.apk" | awk '{print $1}')"
-          test "$PUBLISHED_SHA256" = "$EXPECTED_SHA256" || {
-            echo "Server APK bytes do not match the signed build checksum."
-            exit 1
-          }
-          echo "Published and byte-verified $RELEASE_VERSION ($APK_NAME), SHA-256 $EXPECTED_SHA256."
+            'https://mahmoudaljuorany.store/updates/iraq-network-monitor/version.json.sig' -o "$RUNNER_TEMP/published-version.json.sig"
+          cmp "$RUNNER_TEMP/monitor-update/version.json.sig" "$RUNNER_TEMP/published-version.json.sig"
+          openssl pkeyutl -verify -rawin -pubin \
+            -inkey "$RUNNER_TEMP/monitor-update-public.pem" \
+            -sigfile "$RUNNER_TEMP/published-version.json.sig" \
+            -in "$RUNNER_TEMP/published-version.json"
+
+          for url in \
+            'https://mahmoudaljuorany.store/release_notes.json' \
+            'https://mahmoudaljuorany.store/updates/iraq-network-monitor/release_notes.json'; do
+            curl --fail --silent --show-error --max-redirs 0 --max-time 30 \
+              -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "$url" \
+              -o "$RUNNER_TEMP/published-release-notes.json"
+            cmp release_notes.json "$RUNNER_TEMP/published-release-notes.json"
+          done
+
+          for url in \
+            "https://mahmoudaljuorany.store/$APK_NAME" \
+            "https://mahmoudaljuorany.store/updates/iraq-network-monitor/$APK_NAME"; do
+            curl --fail --silent --show-error --max-redirs 0 --max-time 180 \
+              -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "$url" \
+              -o "$RUNNER_TEMP/published-release.apk"
+            PUBLISHED_SHA256="$(sha256sum "$RUNNER_TEMP/published-release.apk" | awk '{print $1}')"
+            test "$PUBLISHED_SHA256" = "$EXPECTED_SHA256" || {
+              echo "Published APK bytes do not match the signed build checksum."
+              exit 1
+            }
+          done
+          echo "Published and verified isolated signed update $RELEASE_VERSION ($APK_NAME), SHA-256 $EXPECTED_SHA256."
 
       - name: Remove temporary signing material
         if: always()
-        run: rm -f android/key.properties android/app/upload-keystore.jks
+        run: rm -f android/key.properties android/app/upload-keystore.jks "$RUNNER_TEMP/monitor-update-private.pem" "$RUNNER_TEMP/monitor-update-public.pem" "$RUNNER_TEMP/monitor-update/version.sig.bin"

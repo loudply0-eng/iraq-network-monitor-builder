@@ -14,6 +14,7 @@ import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'services/update_manifest_verifier.dart';
 
 class _UpdateSizeLimitException implements Exception {
   const _UpdateSizeLimitException();
@@ -334,7 +335,11 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   static const String versionUrl =
-      'https://mahmoudaljuorany.store/version.json';
+      'https://mahmoudaljuorany.store/updates/iraq-network-monitor/version.json';
+  static const String manifestPublicKeyBase64 = String.fromEnvironment(
+    'MONITOR_UPDATE_PUBLIC_KEY_BASE64',
+    defaultValue: '',
+  );
 
   String cellData = "اضغط لقراءة الإشارة";
   String? signalErrorMessage;
@@ -776,6 +781,55 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     return (await sha256.bind(file.openRead()).first).toString();
   }
 
+  Future<List<int>> _fetchUpdatePayload(
+    Uri uri, {
+    required int maxBytes,
+    required String label,
+  }) async {
+    final client = http.Client();
+    try {
+      final request = http.Request('GET', uri)
+        ..followRedirects = false
+        ..maxRedirects = 0
+        ..headers['Cache-Control'] = 'no-cache, no-store, max-age=0'
+        ..headers['Accept-Encoding'] = 'identity';
+      final response = await client
+          .send(request)
+          .timeout(const Duration(seconds: 25));
+      if (response.statusCode != 200 || response.request?.url != uri) {
+        throw Exception(tr(
+          'رفض خادم التحديث أو أعاد توجيه الطلب',
+          '$label request was rejected or redirected',
+        ));
+      }
+      final declaredLength = response.contentLength;
+      if (declaredLength != null && declaredLength > maxBytes) {
+        throw Exception(tr(
+          'حجم بيانات التحديث أكبر من الحد المسموح',
+          '$label exceeds the allowed size',
+        ));
+      }
+      final bytes = <int>[];
+      await for (final chunk in response.stream.timeout(
+        const Duration(seconds: 25),
+      )) {
+        if (bytes.length + chunk.length > maxBytes) {
+          throw Exception(tr(
+            'حجم بيانات التحديث أكبر من الحد المسموح',
+            '$label exceeds the allowed size',
+          ));
+        }
+        bytes.addAll(chunk);
+      }
+      if (bytes.isEmpty) {
+        throw Exception(tr('بيانات التحديث فارغة', '$label is empty'));
+      }
+      return bytes;
+    } finally {
+      client.close();
+    }
+  }
+
   Future<void> checkForUpdates({bool showPrompt = false}) async {
     if (!mounted || checkingForUpdates) return;
     setState(() => checkingForUpdates = true);
@@ -789,53 +843,36 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         throw Exception(tr('عنوان خادم التحديث غير موثوق', 'Untrusted update manifest endpoint'));
       }
 
-      const maxManifestBytes = 64 * 1024;
-      final manifestClient = http.Client();
-      late final List<int> manifestBytes;
-      try {
-        final request = http.Request('GET', updateManifestUri)
-          ..followRedirects = false
-          ..maxRedirects = 0
-          ..headers['Cache-Control'] = 'no-cache'
-          ..headers['Accept-Encoding'] = 'identity';
-        final streamedResponse = await manifestClient
-            .send(request)
-            .timeout(const Duration(seconds: 25));
-
-        if (streamedResponse.statusCode != 200 ||
-            streamedResponse.request?.url != updateManifestUri) {
-          throw Exception(tr(
-            'رفض خادم التحديث أو أعاد توجيه الطلب إلى عنوان آخر',
-            'Update server rejected the request or redirected it',
-          ));
-        }
-        final declaredLength = streamedResponse.contentLength;
-        if (declaredLength != null && declaredLength > maxManifestBytes) {
-          throw Exception(tr(
-            'ملف بيانات التحديث أكبر من الحد المسموح',
-            'Update manifest exceeds the allowed size',
-          ));
-        }
-
-        final receivedBytes = <int>[];
-        await for (final chunk in streamedResponse.stream
-            .timeout(const Duration(seconds: 25))) {
-          if (receivedBytes.length + chunk.length > maxManifestBytes) {
-            throw Exception(tr(
-              'ملف بيانات التحديث أكبر من الحد المسموح',
-              'Update manifest exceeds the allowed size',
-            ));
-          }
-          receivedBytes.addAll(chunk);
-        }
-        manifestBytes = receivedBytes;
-      } finally {
-        manifestClient.close();
+      if (manifestPublicKeyBase64.isEmpty) {
+        throw Exception(tr(
+          'مفتاح التحقق من تحديثات التطبيق غير مهيأ',
+          'The update verification key is not configured',
+        ));
       }
-
-      final decoded = jsonDecode(utf8.decode(manifestBytes));
-      if (decoded is! Map<String, dynamic>) {
-        throw Exception(tr('بيانات الإصدار غير صحيحة', 'Invalid release information'));
+      final manifestBytes = await _fetchUpdatePayload(
+        updateManifestUri,
+        maxBytes: UpdateManifestVerifier.maxManifestBytes,
+        label: tr('ملف بيانات التحديث', 'Update manifest'),
+      );
+      final signatureUri = updateManifestUri.replace(
+        path: '${updateManifestUri.path}.sig',
+      );
+      final signatureBytes = await _fetchUpdatePayload(
+        signatureUri,
+        maxBytes: 256,
+        label: tr('توقيع التحديث', 'Update signature'),
+      );
+      final decoded = await UpdateManifestVerifier.verify(
+        manifestBytes: manifestBytes,
+        signatureBase64: utf8.decode(signatureBytes).trim(),
+        publicKeyBase64: manifestPublicKeyBase64,
+      );
+      if (decoded['application_id'] != 'com.example.abrj_iraq' ||
+          decoded['platform'] != 'android') {
+        throw Exception(tr(
+          'ملف التحديث لا يخص هذا التطبيق',
+          'Update manifest is for a different application',
+        ));
       }
 
       final latestVersion = decoded['latest_version']?.toString().trim() ?? '';
@@ -856,9 +893,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
           downloadUri.host.toLowerCase() != 'mahmoudaljuorany.store' ||
           downloadUri.port != 443 ||
           downloadUri.userInfo.isNotEmpty ||
+          downloadUri.hasQuery ||
           downloadUri.hasFragment ||
-          !downloadUri.path.startsWith('/iraq-network-monitor-') ||
-          !downloadUri.path.endsWith('.apk')) {
+          downloadUri.pathSegments.length != 3 ||
+          downloadUri.pathSegments[0] != 'updates' ||
+          downloadUri.pathSegments[1] != 'iraq-network-monitor' ||
+          !downloadUri.pathSegments[2].startsWith('iraq-network-monitor-') ||
+          !downloadUri.pathSegments[2].endsWith('.apk')) {
         throw Exception(tr('رابط التحديث غير موثوق أو غير صالح', 'Untrusted or invalid update URL'));
       }
       final checksumValue = decoded['sha256'] ?? decoded['sha256_checksum'];
@@ -942,7 +983,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     try {
       final uri = Uri.https(
         'mahmoudaljuorany.store',
-        '/release_notes.json',
+        '/updates/iraq-network-monitor/release_notes.json',
       );
       const maxReleaseNotesBytes = 64 * 1024;
       final client = http.Client();
