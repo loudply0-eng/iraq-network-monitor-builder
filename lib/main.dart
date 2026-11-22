@@ -1100,13 +1100,11 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       if (showPrompt) {
         await showUpdateDialog();
       } else if (!updateNoticeShown && mounted) {
+        // Show the signed release notes and the download/install action directly
+        // when a new version is found. Keep it to once per app session so that
+        // periodic checks and app-resume events do not repeatedly interrupt users.
         updateNoticeShown = true;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(tr(
-            'يتوفر تحديث جديد $latestVersion. افتح الإعدادات لمراجعته.',
-            'Update $latestVersion is available. Open Settings to review it.',
-          ))),
-        );
+        await showUpdateDialog();
       }
     } catch (e) {
       setUpdateStatus(tr('تعذر فحص التحديث: ${shortError(e)}', 'Could not check for updates: ${shortError(e)}'));
