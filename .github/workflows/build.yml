@@ -352,21 +352,23 @@ jobs:
           APK_TMP=".$APK_NAME.tmp-$GITHUB_RUN_ID"
           NOTES_TMP=".release_notes.json.tmp-$GITHUB_RUN_ID"
           VERSION_TMP=".version.json.tmp-$GITHUB_RUN_ID"
+          [[ "$UPDATE_SFTP_PATH" == "/incoming" ]] || { echo "UPDATE_SFTP_PATH must be /incoming for the isolated account."; exit 1; }
+
           cat > "$RUNNER_TEMP/ota_publish.sftp" <<SFTP
           put build/app/outputs/flutter-apk/app-release.apk "$UPDATE_SFTP_PATH/$APK_TMP"
           put release_notes.json "$UPDATE_SFTP_PATH/$NOTES_TMP"
           put "$RUNNER_TEMP/version.json" "$UPDATE_SFTP_PATH/$VERSION_TMP"
+          rename "$UPDATE_SFTP_PATH/$APK_TMP" "$UPDATE_SFTP_PATH/$APK_NAME"
+          rename "$UPDATE_SFTP_PATH/$NOTES_TMP" "$UPDATE_SFTP_PATH/release_notes.json"
+          rename "$UPDATE_SFTP_PATH/$VERSION_TMP" "$UPDATE_SFTP_PATH/version.json"
           SFTP
 
-          COMMON_SSH_OPTS=(-p "$UPDATE_SFTP_PORT" -i "$HOME/.ssh/ota_deploy_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" -o ConnectTimeout=20)
+          # Publish exclusively through the chrooted SFTP account. The OpenSSH
+          # SFTP rename extension gives POSIX replacement semantics; manifest last.
           sftp -b "$RUNNER_TEMP/ota_publish.sftp" -P "$UPDATE_SFTP_PORT" -i "$HOME/.ssh/ota_deploy_key" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" -o ConnectTimeout=20 \
             "$UPDATE_SFTP_USER@$UPDATE_SFTP_HOST"
-
-          # Rename files on the same remote filesystem; publish version.json last.
-          ssh "${COMMON_SSH_OPTS[@]}" "$UPDATE_SFTP_USER@$UPDATE_SFTP_HOST" \
-            "set -eu; mv -f -- '$UPDATE_SFTP_PATH/$APK_TMP' '$UPDATE_SFTP_PATH/$APK_NAME'; mv -f -- '$UPDATE_SFTP_PATH/$NOTES_TMP' '$UPDATE_SFTP_PATH/release_notes.json'; mv -f -- '$UPDATE_SFTP_PATH/$VERSION_TMP' '$UPDATE_SFTP_PATH/version.json'"
 
           curl --fail --silent --show-error --max-redirs 0 --max-time 30 \
             -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
