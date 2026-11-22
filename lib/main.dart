@@ -324,14 +324,16 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   Future<void> showSettings() async {
     await showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
       builder: (sheetContext) => ValueListenableBuilder<bool>(
         valueListenable: AppPreferences.english,
         builder: (context, english, _) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(18),
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               Text(english ? 'Settings' : 'الإعدادات', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 20, fontWeight: FontWeight.bold)),
               const SizedBox(height: 12),
               ListTile(
@@ -457,7 +459,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               ElevatedButton.icon(
                 onPressed: checkingForUpdates ? null : () { Navigator.of(sheetContext).pop(); checkForUpdates(showPrompt: true); },
                 icon: checkingForUpdates ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.system_update_alt),
-                label: Text(english ? 'Check for app updates' : 'فحص تحديثات التطبيق'),
+                label: Text(english ? 'Update app / Check for updates' : 'تحديث التطبيق / فحص التحديثات'),
               ),
               if (updateStatus.isNotEmpty) Padding(
                 padding: const EdgeInsets.only(top: 10),
@@ -473,7 +475,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                       : (english ? 'Download update $pendingVersion' : 'تنزيل التحديث $pendingVersion')),
                 ),
               ],
-            ]),
+              ]),
+            ),
           ),
         ),
       ),
