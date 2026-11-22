@@ -477,7 +477,6 @@ jobs:
             }
           done
           echo "Published and verified isolated signed update $RELEASE_VERSION ($APK_NAME), SHA-256 $EXPECTED_SHA256."
-          echo "Published and byte-verified $RELEASE_VERSION ($APK_NAME), SHA-256 $EXPECTED_SHA256."
 
       - name: Remove temporary signing material
         if: always()
