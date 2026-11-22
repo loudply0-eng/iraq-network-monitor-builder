@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      force_publish:
+        description: 'Repair and republish the current version to the update server'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -67,6 +73,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export FORCE_RELEASE="${{ github.event.inputs.force_publish || 'false' }}"
           python3 - <<'PY'
           import json
           import re
@@ -109,14 +116,19 @@ jobs:
           if not published_match:
               raise SystemExit("Published version.json has an invalid latest_version.")
           published = tuple(int(part) for part in published_match.groups())
-          if candidate <= published:
+          import os
+          force_release = os.environ.get("FORCE_RELEASE", "false").strip().lower() == "true"
+          if force_release:
+              print(f"Repair publish requested for {candidate_text}.")
+              should_release = True
+          elif candidate <= published:
               print(f"No release needed: source {candidate_text}, already published {published_text}.")
-              with open(__import__("os").environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-                  output.write("should_release=false\n")
+              should_release = False
           else:
               print(f"New release detected: {candidate_text} (published: {published_text}).")
-              with open(__import__("os").environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-                  output.write("should_release=true\n")
+              should_release = True
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"should_release={'true' if should_release else 'false'}\n")
           PY
 
       - name: Prepare original release signing key
@@ -463,22 +475,31 @@ jobs:
             -sigfile "$RUNNER_TEMP/published-version.sig.bin" \
             -in "$RUNNER_TEMP/published-version.json"
 
+          # Optional metadata must not block delivery to legacy app builds.
           for url in \
             'https://mahmoudaljuorany.store/release_notes.json' \
             'https://mahmoudaljuorany.store/updates/iraq-network-monitor/release_notes.json'; do
-            curl --fail --silent --show-error --max-redirs 0 --max-time 30 \
-              -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "$url" \
-              -o "$RUNNER_TEMP/published-release-notes.json"
-            cmp release_notes.json "$RUNNER_TEMP/published-release-notes.json"
+            status="$(curl --silent --show-error --max-redirs 0 --max-time 30 \
+              -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+              -w '%{http_code}' "$url" -o "$RUNNER_TEMP/published-release-notes.json")"
+            case "$status" in
+              200) cmp release_notes.json "$RUNNER_TEMP/published-release-notes.json" ;;
+              404) echo "Optional release notes unavailable at $url; continuing." ;;
+              *) echo "Unexpected HTTP $status checking release notes at $url"; exit 1 ;;
+            esac
           done
 
           for url in \
             'https://mahmoudaljuorany.store/changelog.json' \
             'https://mahmoudaljuorany.store/updates/iraq-network-monitor/changelog.json'; do
-            curl --fail --silent --show-error --max-redirs 0 --max-time 30 \
-              -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "$url" \
-              -o "$RUNNER_TEMP/published-changelog.json"
-            cmp changelog.json "$RUNNER_TEMP/published-changelog.json"
+            status="$(curl --silent --show-error --max-redirs 0 --max-time 30 \
+              -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+              -w '%{http_code}' "$url" -o "$RUNNER_TEMP/published-changelog.json")"
+            case "$status" in
+              200) cmp changelog.json "$RUNNER_TEMP/published-changelog.json" ;;
+              404) echo "Optional changelog unavailable at $url; continuing." ;;
+              *) echo "Unexpected HTTP $status checking changelog at $url"; exit 1 ;;
+            esac
           done
 
           for url in \
