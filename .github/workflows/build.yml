@@ -41,7 +41,10 @@ jobs:
         with:
           channel: stable
           flutter-version: '3.50.0'
-          cache: true
+          # Keep caching off: flutter-action invokes actions/cache@v5 internally when enabled,
+          # which is not pinned to a full SHA and is blocked by the repository Actions policy.
+          cache: false
+          pub-cache: false
 
       - name: Verify release identity
         shell: bash
