@@ -893,8 +893,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
           downloadUri.host.toLowerCase() != 'mahmoudaljuorany.store' ||
           downloadUri.port != 443 ||
           downloadUri.userInfo.isNotEmpty ||
+          downloadUri.hasQuery ||
           downloadUri.hasFragment ||
-          !RegExp(r'^/updates/iraq-network-monitor/iraq-network-monitor-\d+\.\d+\.\d+-\d+\.apk
+          downloadUri.pathSegments.length != 3 ||
+          downloadUri.pathSegments[0] != 'updates' ||
+          downloadUri.pathSegments[1] != 'iraq-network-monitor' ||
+          !downloadUri.pathSegments[2].startsWith('iraq-network-monitor-') ||
+          !downloadUri.pathSegments[2].endsWith('.apk')) {
         throw Exception(tr('رابط التحديث غير موثوق أو غير صالح', 'Untrusted or invalid update URL'));
       }
       final checksumValue = decoded['sha256'] ?? decoded['sha256_checksum'];
