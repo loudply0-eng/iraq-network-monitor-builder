@@ -71,9 +71,10 @@ jobs:
         id: release_gate
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         shell: bash
+        env:
+          FORCE_RELEASE: ${{ github.event.inputs.force_publish || contains(github.event.head_commit.message || '', '[repair-publish]') }}
         run: |
           set -euo pipefail
-          export FORCE_RELEASE="${{ github.event.inputs.force_publish || contains(github.event.head_commit.message || '', '[repair-publish]') }}"
           python3 - <<'PY'
           import json
           import re
