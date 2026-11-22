@@ -1,15 +1,13 @@
 {
-  "latest_version": "1.0.25+28",
+  "latest_version": "1.0.26+29",
   "notes_ar": [
-    "إضافة زر حول التطبيق لشرح وظيفة مراقب شبكات العراق وأقسامه وأدواته.",
-    "إضافة سجل تغييرات يعرض الإضافات والتحسينات لكل إصدار.",
-    "إصلاح التحقق النهائي من توقيع Ed25519 بعد تنزيل ملف التوقيع بصيغة Base64.",
-    "نشر سجل التغييرات على مسار مستقل خاص بالتطبيق."
+    "إصلاح عرض زر تحديث التطبيق داخل الإعدادات على الشاشات الصغيرة.",
+    "جعل نافذة الإعدادات قابلة للتمرير حتى تبقى جميع الخيارات وأزرار التحديث متاحة.",
+    "توضيح اسم زر فحص التحديثات."
   ],
   "notes_en": [
-    "Add an About page explaining Iraq Network Monitor and its tools.",
-    "Add a version history showing features and improvements for each release.",
-    "Fix final Ed25519 signature verification after decoding the Base64 signature.",
-    "Publish the change history on a dedicated app-specific endpoint."
+    "Fix the app update action visibility in settings on smaller screens.",
+    "Make the settings sheet scrollable so all options and update actions remain accessible.",
+    "Clarify the update-check button label."
   ]
 }
