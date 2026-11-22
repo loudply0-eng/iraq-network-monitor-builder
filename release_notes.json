@@ -1,13 +1,13 @@
 {
-  "latest_version": "1.0.26+29",
+  "latest_version": "1.0.27+30",
   "notes_ar": [
-    "إصلاح عرض زر تحديث التطبيق داخل الإعدادات على الشاشات الصغيرة.",
-    "جعل نافذة الإعدادات قابلة للتمرير حتى تبقى جميع الخيارات وأزرار التحديث متاحة.",
-    "توضيح اسم زر فحص التحديثات."
+    "إظهار نافذة التحديث تلقائياً عند اكتشاف إصدار جديد، مع سجل التغييرات وخيار التنزيل والتثبيت.",
+    "الإبقاء على زر تحديث التطبيق وفحص التحديثات داخل الإعدادات.",
+    "منع تكرار نافذة التحديث أكثر من مرة خلال جلسة التطبيق."
   ],
   "notes_en": [
-    "Fix the app update action visibility in settings on smaller screens.",
-    "Make the settings sheet scrollable so all options and update actions remain accessible.",
-    "Clarify the update-check button label."
+    "Automatically show the update dialog when a new release is detected, with release notes and download/install action.",
+    "Keep the app update and check button available in Settings.",
+    "Avoid showing the automatic update dialog more than once per app session."
   ]
 }
