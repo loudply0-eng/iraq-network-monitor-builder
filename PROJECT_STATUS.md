@@ -8,7 +8,7 @@ This is the canonical hand-off document for future development sessions. The pub
 
 - Repository: `loudply0-eng/iraq-network-monitor-builder`
 - Default branch: `main`
-- Audited main HEAD: `caa01f557828f3598d4cd10081209c1d5ea8cde3` (2026-11-27).
+- Audited application source commit: `caa01f557828f3598d4cd10081209c1d5ea8cde3` (2026-11-27; release source for `1.0.28+31`).
 - App version recorded in `pubspec.yaml`, `release_notes.json`, and `changelog.json`: `1.0.28+31`.
 - Android application ID: `com.example.abrj_iraq`.
 - Flutter SDK: `3.50.0`, pinned to official source commit `ab2912035e160d9cad6306df307576da6128ebdb`.
@@ -120,6 +120,8 @@ Device-dependent cellular fields are not guaranteed on every Android build, mode
 ## Build and source-control hygiene
 
 - Documentation-only pushes to `main` should not start Android build jobs; the workflow filters `PROJECT_STATUS.md`, `README.md`, `SECURITY.md`, and `docs/**` on `push`. Pull-request checks remain enabled for every PR so the required `build` status is never left pending.
+- Every pull request still runs Flutter dependency resolution, static analysis, and widget tests. A pull request runs the Gradle debug APK build and uploads a debug artifact only when application sources, tests, Android configuration, assets, or dependency/analyzer files change.
+- Newer pull-request commits supersede and cancel older pull-request checks; this cancellation policy does not apply to trusted `main` release builds.
 - Keep application code, Android configuration, tests, dependency locks, and workflow changes under CI.
 - Pull requests must be built without production signing or deployment secrets.
 - Do not use force-publish as a substitute for fixing a source/version mismatch.
