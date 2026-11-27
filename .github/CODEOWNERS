@@ -8,3 +8,9 @@
 /lib/ @loudply0-eng
 /pubspec.yaml @loudply0-eng
 /pubspec.lock @loudply0-eng
+/.github/CODEOWNERS @loudply0-eng
+/.gitignore @loudply0-eng
+/SECURITY.md @loudply0-eng
+/codemagic.yaml @loudply0-eng
+/android/settings.gradle.kts @loudply0-eng
+/android/gradle.properties @loudply0-eng
