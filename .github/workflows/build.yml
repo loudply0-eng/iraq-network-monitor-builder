@@ -3,8 +3,22 @@ name: Build Iraq Network Monitor APK
 on:
   push:
     branches: [main]
+    # Documentation-only changes must not consume a build job.
+    paths-ignore:
+      - 'PROJECT_STATUS.md'
+      - 'README.md'
+      - 'SECURITY.md'
+      - 'docs/**'
+      - '.gitignore'
   pull_request:
     branches: [main]
+    # Keep code and workflow changes covered by CI; skip documentation-only PRs.
+    paths-ignore:
+      - 'PROJECT_STATUS.md'
+      - 'README.md'
+      - 'SECURITY.md'
+      - 'docs/**'
+      - '.gitignore'
   workflow_dispatch:
     inputs:
       force_publish:
