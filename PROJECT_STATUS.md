@@ -104,7 +104,7 @@ Device-dependent cellular fields are not guaranteed on every Android build, mode
 
 ## Build and source-control hygiene
 
-- Documentation-only pushes to `main` should not start Android build jobs; the workflow filters `PROJECT_STATUS.md`, `README.md`, `SECURITY.md`, `docs/**`, and `.gitignore` on `push`. Pull-request checks remain enabled for every PR so the required `build` status is never left pending.
+- Documentation-only pushes to `main` should not start Android build jobs; the workflow filters `PROJECT_STATUS.md`, `README.md`, `SECURITY.md`, and `docs/**` on `push`. Pull-request checks remain enabled for every PR so the required `build` status is never left pending.
 - Keep application code, Android configuration, tests, dependency locks, and workflow changes under CI.
 - Pull requests must be built without production signing or deployment secrets.
 - Do not use force-publish as a substitute for fixing a source/version mismatch.
