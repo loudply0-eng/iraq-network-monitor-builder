@@ -266,8 +266,8 @@ jobs:
           set -euo pipefail
           git fetch --no-tags --depth=1 origin "$BASE_SHA"
           CHANGED_FILES="$(git diff --name-only "$BASE_SHA" HEAD)"
-          printf '%s\\n' "$CHANGED_FILES"
-          if printf '%s\\n' "$CHANGED_FILES" | grep -Eq '^(lib/|test/|integration_test/|android/|assets/|pubspec\\.yaml$|pubspec\\.lock$|analysis_options\\.yaml$)'; then
+          printf '%s\n' "$CHANGED_FILES"
+          if printf '%s\n' "$CHANGED_FILES" | grep -Eq '^(lib/|test/|integration_test/|android/|assets/|pubspec[.]yaml$|pubspec[.]lock$|analysis_options[.]yaml$)'; then
             echo "required=true" >> "$GITHUB_OUTPUT"
             echo "Application sources, tests, Android configuration, or dependencies changed; building the debug APK."
           else
