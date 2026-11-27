@@ -1,6 +1,20 @@
 {
-  "latest_version": "1.0.27+30",
+  "latest_version": "1.0.28+31",
   "releases": [
+    {
+      "version": "1.0.28+31",
+      "date": "2026-11-27",
+      "notes_ar": [
+        "إضافة إعداد لتحديد مستوى ضعف إشارة RSRP الذي يطلق التنبيه من ‎-120 إلى ‎-90 dBm.",
+        "حفظ مستوى التنبيه المختار حتى بعد إغلاق التطبيق وإعادة تشغيله.",
+        "إضافة هامش ثبات لمنع تكرار التنبيهات بسبب تذبذب الإشارة البسيط."
+      ],
+      "notes_en": [
+        "Add a configurable RSRP weak-signal alert threshold from -120 to -90 dBm.",
+        "Persist the selected alert threshold across app restarts.",
+        "Add signal hysteresis to prevent repeated alerts from minor fluctuations."
+      ]
+    },
     {
       "version": "1.0.27+30",
       "date": "2026-11-22",
