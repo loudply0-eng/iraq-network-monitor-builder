@@ -8,8 +8,8 @@ This is the canonical hand-off document for future development sessions. The pub
 
 - Repository: `loudply0-eng/iraq-network-monitor-builder`
 - Default branch: `main`
-- Audited main HEAD: `30e4edc8d99b016606e065a21aa3fd84f8e69281` (2026-11-23).
-- App version recorded in `pubspec.yaml`, `release_notes.json`, and `changelog.json`: `1.0.27+30`.
+- Audited main HEAD: `caa01f557828f3598d4cd10081209c1d5ea8cde3` (2026-11-27).
+- App version recorded in `pubspec.yaml`, `release_notes.json`, and `changelog.json`: `1.0.28+31`.
 - Android application ID: `com.example.abrj_iraq`.
 - Flutter SDK: `3.50.0`, pinned to official source commit `ab2912035e160d9cad6306df307576da6128ebdb`.
 - Java: 17.
@@ -17,20 +17,33 @@ This is the canonical hand-off document for future development sessions. The pub
 
 ## Confirmed release history
 
-### Production release — 1.0.27+30
+### Production release — 1.0.28+31
+
+- Public builder Actions run #148, run ID `46055474146`, source commit `caa01f557828f3598d4cd10081209c1d5ea8cde3`.
+- Completed successfully on 2026-11-27.
+- The run passed Flutter analysis and tests, the release gate, original Android keystore validation, separate OTA signing-key validation, signed release APK build, APK signer identity validation, Ed25519 manifest signing, SFTP publication, and public download/manifest verification.
+- APK filename: `iraq-network-monitor-1.0.28-31.apk`.
+- APK size: approximately 50.9 MB.
+- Published direct APK: `https://mahmoudaljuorany.store/iraq-network-monitor-1.0.28-31.apk`.
+- Published app-specific OTA APK: `https://mahmoudaljuorany.store/updates/iraq-network-monitor/iraq-network-monitor-1.0.28-31.apk`.
+- Legacy manifest: `https://mahmoudaljuorany.store/version.json`.
+- App-specific manifest: `https://mahmoudaljuorany.store/updates/iraq-network-monitor/version.json`.
+- App-specific Ed25519 signature: `https://mahmoudaljuorany.store/updates/iraq-network-monitor/version.json.sig`.
+- Published APK SHA-256: `0ac456daaae8447a216bacfcd451057344714458eee64689a8f0b7ea3010d6f3`.
+- The APK certificate matched the established production certificate fingerprint below. The workflow also verified the signed manifest and downloaded APK hashes from both public paths.
+- Treat run #148 as the current confirmed production release.
+
+### CI run for the release change — not a release
+
+- Public builder Actions run #147, run ID `46052313302`, pull request #23.
+- Completed successfully as a pull-request CI run.
+- This run performed CI/debug validation only; it did not build or publish a production-signed release APK.
+
+### Previous production release — 1.0.27+30
 
 - Public builder Actions run #119, run ID `45017175457`, source commit `05cb09f61d565ca1abffd85b8078d7d9fa794767`.
 - Completed successfully on 2026-11-22.
-- Recorded successful stages: Flutter setup, dependency resolution, Flutter analysis, widget tests, original Android keystore validation, separate OTA signing-key validation, signed release APK build, APK signer fingerprint validation, Ed25519 update-manifest signing and verification, SFTP publication, and public download/manifest verification.
-- The most recent known production release recorded in the repository is `1.0.27+30`. The live production manifest could not be fetched during the 2026-11-27 audit, so re-check `https://mahmoudaljuorany.store/version.json` and the app-specific signed manifest before the next publication.
-
-### Later CI run — not a new release
-
-- Public builder Actions run #140, run ID `45116054358`, commit `30e4edc8d99b016606e065a21aa3fd84f8e69281`.
-- Completed successfully on 2026-11-23.
-- Flutter analysis and widget tests passed.
-- The release gate found that the candidate `1.0.27+30` was already published, so it skipped keystore use, APK generation, and publishing.
-- Treat this as successful CI only, not a new APK or a new production release.
+- Superseded by production release `1.0.28+31`.
 
 ## Current release pipeline behavior
 
@@ -76,6 +89,8 @@ The current audited application source includes:
 - Cellular signal and radio data: RSRP, RSRQ, RSSI, SINR, band/channel identifiers, cell identity, serving and neighboring cells, and SIM details where Android/device support exposes them.
 - Wi-Fi analyzer with nearby scan results and channel occupancy suggestions limited to the networks Android allows the app to scan.
 - Optional in-app alerts, while the app is open, for signal loss/degradation, cell changes, and 5G detection.
+- Configurable RSRP weak-signal alert threshold from `-120` to `-90 dBm`, with default `-110 dBm`, saved across app restarts.
+- A 5 dB hysteresis rule to reduce repeated weak-signal alerts from small fluctuations.
 - LTE EARFCN/channel calculations and field tools.
 
 ### Mapping and field measurements
