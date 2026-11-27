@@ -3370,20 +3370,22 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         Expanded(
           child: readingHistory.isEmpty
               ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.history, size: 48, color: mutedTextColor),
-                      const SizedBox(height: 10),
-                      Text(tr('لا توجد قياسات محفوظة بعد', 'No measurements saved yet'),
-                          style: TextStyle(color: mutedTextColor)),
-                      const SizedBox(height: 10),
-                      OutlinedButton.icon(
-                        onPressed: () => setState(() => selectedTab = 0),
-                        icon: const Icon(Icons.network_cell),
-                        label: Text(tr('اذهب إلى تبويب الشبكة', 'Go to Network tab')),
-                      ),
-                    ],
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.history, size: 24, color: mutedTextColor),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            tr('لا توجد قياسات محفوظة بعد. اقرأ الإشارة لبدء السجل.', 'No measurements saved yet. Read the signal to start the history.'),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: mutedTextColor),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 )
               : visibleHistory.isEmpty
