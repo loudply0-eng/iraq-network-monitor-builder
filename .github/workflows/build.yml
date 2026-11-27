@@ -9,7 +9,6 @@ on:
       - 'README.md'
       - 'SECURITY.md'
       - 'docs/**'
-      - '.gitignore'
   pull_request:
     # Always run the required status check on PRs, including documentation-only PRs.
     branches: [main]
