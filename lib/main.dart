@@ -3230,7 +3230,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     final tiles = <Widget>[
       _historyStatistic(tr('عدد القراءات', 'Readings'), summary.readingCount.toString()),
       _historyStatistic(
-        tr('متوسط RSRP', 'Average RSRP'),
+        tr('متوسط RSRP · ${summary.rsrpSampleCount} عينة', 'Average RSRP · ${summary.rsrpSampleCount} samples'),
         summary.averageRsrp == null ? '—' : '${summary.averageRsrp!.toStringAsFixed(1)} dBm',
       ),
       _historyStatistic(
@@ -3242,7 +3242,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         summary.strongestRsrp == null ? '—' : '${summary.strongestRsrp} dBm',
       ),
       _historyStatistic(
-        tr('متوسط SINR', 'Average SINR'),
+        tr('متوسط SINR · ${summary.sinrSampleCount} عينة', 'Average SINR · ${summary.sinrSampleCount} samples'),
         summary.averageSinr == null ? '—' : '${summary.averageSinr!.toStringAsFixed(1)} dB',
       ),
       _historyStatistic(tr('الخلايا المختلفة', 'Distinct cells'), summary.distinctCellCount.toString()),
