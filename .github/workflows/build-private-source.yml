@@ -1,0 +1,584 @@
+name: Build private-source Iraq Network Monitor release
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_publish:
+        description: 'Repair and republish this exact private-source version'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-source-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: source
+    timeout-minutes: 45
+    steps:
+      - name: Validate private-source read token
+        working-directory: .
+        shell: bash
+        env:
+          PRIVATE_SOURCE_READ_TOKEN: ${{ secrets.PRIVATE_SOURCE_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${PRIVATE_SOURCE_READ_TOKEN:-}" ]]; then
+            echo "Missing PRIVATE_SOURCE_READ_TOKEN. Add a fine-grained token with Contents: Read access to loudply0-eng/iraq-network-monitor."
+            exit 1
+          fi
+
+      - name: Checkout pinned private release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: loudply0-eng/iraq-network-monitor
+          ref: 9e83c31ddf608a59535fcd2b59e86a8dc700704d
+          token: ${{ secrets.PRIVATE_SOURCE_READ_TOKEN }}
+          path: source
+          persist-credentials: false
+
+      - name: Verify pinned private source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_SOURCE_COMMIT="9e83c31ddf608a59535fcd2b59e86a8dc700704d"
+          ACTUAL_SOURCE_COMMIT="$(git rev-parse HEAD)"
+          test "$ACTUAL_SOURCE_COMMIT" = "$EXPECTED_SOURCE_COMMIT" || {
+            echo "Private source commit does not match the reviewed release pin."
+            exit 1
+          }
+
+      - name: Set up Java 17
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: zulu
+          java-version: '17'
+
+      - name: Install Flutter 3.50.0 from the official pinned source commit
+        shell: bash
+        env:
+          FLUTTER_SDK_TAG: "3.50.0"
+          FLUTTER_SDK_COMMIT: "ab2912035e160d9cad6306df307576da6128ebdb"
+        run: |
+          set -euo pipefail
+          FLUTTER_ROOT="$RUNNER_TEMP/flutter-sdk"
+          git init "$FLUTTER_ROOT"
+          git -C "$FLUTTER_ROOT" remote add origin https://github.com/flutter/flutter.git
+          git -C "$FLUTTER_ROOT" fetch --no-tags --depth 1 origin "refs/tags/$FLUTTER_SDK_TAG:refs/tags/$FLUTTER_SDK_TAG"
+          ACTUAL_COMMIT="$(git -C "$FLUTTER_ROOT" rev-list -n 1 "refs/tags/$FLUTTER_SDK_TAG")"
+          test "$ACTUAL_COMMIT" = "$FLUTTER_SDK_COMMIT" || {
+            echo "Flutter release tag does not match the pinned official commit."
+            exit 1
+          }
+          git -C "$FLUTTER_ROOT" checkout --detach "$FLUTTER_SDK_COMMIT"
+          echo "$FLUTTER_ROOT/bin" >> "$GITHUB_PATH"
+          echo "FLUTTER_ROOT=$FLUTTER_ROOT" >> "$GITHUB_ENV"
+          "$FLUTTER_ROOT/bin/flutter" --version
+
+      - name: Verify release identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Eq '^version: [0-9]+[.][0-9]+[.][0-9]+[+][0-9]+$' pubspec.yaml
+          grep -Fq 'applicationId = "com.example.abrj_iraq"' android/app/build.gradle.kts
+
+      - name: Accept Android licenses
+        run: yes | flutter doctor --android-licenses || true
+
+      - name: Configure Android SDK
+        run: |
+          echo "flutter.sdk=$FLUTTER_ROOT" > android/local.properties
+          echo "sdk.dir=$ANDROID_HOME" >> android/local.properties
+
+      - name: Install Flutter packages
+        run: flutter pub get --enforce-lockfile
+
+      - name: Analyze Flutter source
+        run: flutter analyze --no-fatal-infos
+
+      - name: Run Flutter widget tests
+        run: flutter test --reporter expanded
+
+      - name: Decide whether a new production release is required
+        id: release_gate
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        shell: bash
+        env:
+          FORCE_RELEASE: ${{ github.event.inputs.force_publish || contains(github.event.head_commit.message || '', '[repair-publish]') }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import re
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          manifest_url = "https://mahmoudaljuorany.store/version.json"
+          version_text = Path("pubspec.yaml").read_text(encoding="utf-8")
+          match = re.search(r"^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$", version_text, re.M)
+          if not match:
+              raise SystemExit("pubspec.yaml must contain version: x.y.z+build.")
+          candidate_text = f"{match.group(1)}+{match.group(2)}"
+          candidate = tuple(int(part) for part in (*match.group(1).split("."), match.group(2)))
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          opener = urllib.request.build_opener(NoRedirect)
+          request = urllib.request.Request(
+              manifest_url,
+              headers={"Cache-Control": "no-cache", "Pragma": "no-cache", "User-Agent": "Iraq-Network-Monitor-Release-CI"},
+          )
+          try:
+              with opener.open(request, timeout=20) as response:
+                  if response.geturl() != manifest_url:
+                      raise SystemExit("Published version manifest URL changed unexpectedly.")
+                  payload = response.read(64 * 1024 + 1)
+                  if len(payload) > 64 * 1024:
+                      raise SystemExit("Published version manifest exceeds 64 KiB.")
+                  current = json.loads(payload)
+          except urllib.error.HTTPError as error:
+              raise SystemExit(f"Could not safely read published version manifest (HTTP {error.code}).") from error
+          except Exception as error:
+              raise SystemExit("Could not verify the published app version: " + str(error)) from error
+
+          published_text = str(current.get("latest_version", "")).strip() if isinstance(current, dict) else ""
+          published_match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)\+(\d+)", published_text)
+          if not published_match:
+              raise SystemExit("Published version.json has an invalid latest_version.")
+          published = tuple(int(part) for part in published_match.groups())
+          import os
+          force_release = os.environ.get("FORCE_RELEASE", "false").strip().lower() == "true"
+          if force_release:
+              print(f"Repair publish requested for {candidate_text}.")
+              should_release = True
+          elif candidate <= published:
+              print(f"No release needed: source {candidate_text}, already published {published_text}.")
+              should_release = False
+          else:
+              print(f"New release detected: {candidate_text} (published: {published_text}).")
+              should_release = True
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"should_release={'true' if should_release else 'false'}\n")
+          PY
+
+      - name: Prepare original release signing key
+        if: steps.release_gate.outputs.should_release == 'true'
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64" || { echo "Missing original release keystore secret"; exit 1; }
+          test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo "Missing original keystore password secret"; exit 1; }
+          test -n "$ANDROID_KEY_ALIAS" || { echo "Missing original key alias secret"; exit 1; }
+          test -n "$ANDROID_KEY_PASSWORD" || { echo "Missing original key password secret"; exit 1; }
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > android/app/upload-keystore.jks
+          chmod 600 android/app/upload-keystore.jks
+          export STORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD"
+          export KEY_ALIAS="$ANDROID_KEY_ALIAS"
+          export KEY_PASSWORD="$ANDROID_KEY_PASSWORD"
+          python3 - <<'PY'
+          import os
+          def escape(value):
+              value = value.replace("\\", "\\\\")
+              for char in ("=", ":", "#", "!"):
+                  value = value.replace(char, "\\" + char)
+              return value
+          values = {
+              "storeFile": "upload-keystore.jks",
+              "storePassword": os.environ["STORE_PASSWORD"],
+              "keyAlias": os.environ["KEY_ALIAS"],
+              "keyPassword": os.environ["KEY_PASSWORD"],
+          }
+          with open("android/key.properties", "w", encoding="utf-8") as f:
+              for key, value in values.items():
+                  f.write(f"{key}={escape(value)}\n")
+          PY
+          chmod 600 android/key.properties
+
+      - name: Verify original keystore before Gradle
+        if: steps.release_gate.outputs.should_release == 'true'
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          OUTPUT_FILE="$(mktemp)"
+          if ! keytool -list -v \
+            -keystore android/app/upload-keystore.jks \
+            -storetype PKCS12 \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" >"$OUTPUT_FILE" 2>&1; then
+            echo "KEYSTORE_VALIDATION_FAILED; safe keytool diagnostic follows:"
+            cat "$OUTPUT_FILE"
+            rm -f "$OUTPUT_FILE"
+            exit 1
+          fi
+          grep -E "Alias name:|SHA256:" "$OUTPUT_FILE" || {
+            echo "KEYSTORE_OPENED_BUT_EXPECTED_FINGERPRINT_LINES_NOT_FOUND"
+            cat "$OUTPUT_FILE"
+            rm -f "$OUTPUT_FILE"
+            exit 1
+          }
+          ACTUAL_CERT_SHA256="$(awk -F': ' '/SHA256:/{gsub(":", "", $2); print tolower($2); exit}' "$OUTPUT_FILE")"
+          EXPECTED_CERT_SHA256="f29ff0e87eabbe89ce0664727652e870eddca3acbfbfe9fab18505e0340b62b8"
+          test "$ACTUAL_CERT_SHA256" = "$EXPECTED_CERT_SHA256" || {
+            echo "Release keystore certificate does not match the established production certificate."
+            rm -f "$OUTPUT_FILE"
+            exit 1
+          }
+          echo "Original production signing certificate verified."
+          rm -f "$OUTPUT_FILE"
+
+      - name: Validate the dedicated OTA signing key
+        if: steps.release_gate.outputs.should_release == 'true'
+        shell: bash
+        env:
+          MONITOR_UPDATE_PRIVATE_KEY_PEM: ${{ secrets.MONITOR_UPDATE_PRIVATE_KEY_PEM }}
+          MONITOR_UPDATE_PUBLIC_KEY_BASE64: ${{ vars.MONITOR_UPDATE_PUBLIC_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          test -n "$MONITOR_UPDATE_PRIVATE_KEY_PEM" || { echo "Missing MONITOR_UPDATE_PRIVATE_KEY_PEM"; exit 1; }
+          test -n "$MONITOR_UPDATE_PUBLIC_KEY_BASE64" || { echo "Missing MONITOR_UPDATE_PUBLIC_KEY_BASE64 repository variable"; exit 1; }
+          umask 077
+          printf '%s\n' "$MONITOR_UPDATE_PRIVATE_KEY_PEM" > "$RUNNER_TEMP/monitor-update-private.pem"
+          openssl pkey -in "$RUNNER_TEMP/monitor-update-private.pem" -pubout -out "$RUNNER_TEMP/monitor-update-public.pem"
+          DER_PUBLIC="$(openssl pkey -in "$RUNNER_TEMP/monitor-update-private.pem" -pubout -outform DER 2>/dev/null | tail -c 32 | base64 -w0)"
+          test "$DER_PUBLIC" = "$MONITOR_UPDATE_PUBLIC_KEY_BASE64" || {
+            echo "OTA private key does not match MONITOR_UPDATE_PUBLIC_KEY_BASE64."
+            exit 1
+          }
+          chmod 600 "$RUNNER_TEMP/monitor-update-private.pem" "$RUNNER_TEMP/monitor-update-public.pem"
+
+      - name: Build signed release APK (trusted main only)
+        if: steps.release_gate.outputs.should_release == 'true'
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          MONITOR_UPDATE_PUBLIC_KEY_BASE64: ${{ vars.MONITOR_UPDATE_PUBLIC_KEY_BASE64 }}
+        run: flutter build apk --release --obfuscate --split-debug-info=build/symbols/${GITHUB_RUN_ID} --dart-define=MONITOR_UPDATE_PUBLIC_KEY_BASE64="$MONITOR_UPDATE_PUBLIC_KEY_BASE64" --verbose
+
+      - name: Build unsigned debug APK for pull requests
+        if: github.event_name == 'pull_request'
+        run: flutter build apk --debug --verbose
+
+      - name: Verify APK identity
+        if: steps.release_gate.outputs.should_release == 'true'
+        run: |
+          set -euo pipefail
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          test -s "$APK"
+          SIGNATURE_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$APK" 2>&1)"
+          printf '%s\n' "$SIGNATURE_OUTPUT"
+          EXPECTED_CERT_SHA256="f29ff0e87eabbe89ce0664727652e870eddca3acbfbfe9fab18505e0340b62b8"
+          grep -Eqi "(Signer #1 certificate SHA-256 digest|V[0-9]+ Signer: certificate SHA-256 digest): $EXPECTED_CERT_SHA256" <<< "$SIGNATURE_OUTPUT" || {
+            echo "APK signing certificate does not match the established production certificate."
+            exit 1
+          }
+          echo "Original production signing certificate verified: $APK"
+
+      - name: Verify final APK package and version
+        if: steps.release_gate.outputs.should_release == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
+          VERSION="$(sed -n 's/^version: *//p' pubspec.yaml | tr -d '\r')"
+          [[ "$VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)\+([0-9]+)$ ]]
+          EXPECTED_NAME="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+          EXPECTED_CODE="${BASH_REMATCH[4]}"
+          BADGING="$("$AAPT" dump badging "$APK")"
+          EXPECTED_LINE="package: name='com.example.abrj_iraq' versionCode='$EXPECTED_CODE' versionName='$EXPECTED_NAME'"
+          grep -Fq "$EXPECTED_LINE" <<< "$BADGING" || {
+            echo "Final APK package, version name or version code does not match source."
+            exit 1
+          }
+
+      - name: Upload validated release APK
+        if: steps.release_gate.outputs.should_release == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: iraq-network-monitor-release-${{ github.run_number }}
+          path: source/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload unsigned debug APK (CI only)
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: iraq-network-monitor-debug-${{ github.run_number }}
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Prepare isolated and legacy-compatible manifests
+        if: steps.release_gate.outputs.should_release == 'true'
+        id: publish_metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -nE 's/^version: ([0-9]+\.[0-9]+\.[0-9]+\+[0-9]+)$/\1/p' pubspec.yaml)"
+          test -n "$VERSION"
+          APK_NAME="iraq-network-monitor-${VERSION/+/-}.apk"
+          APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
+          test -s "$APK_PATH"
+          SHA256="$(sha256sum "$APK_PATH" | awk '{print $1}')"
+          mkdir -p "$RUNNER_TEMP/monitor-update"
+          python3 - "$VERSION" "$APK_NAME" "$SHA256" "$RUNNER_TEMP" release_notes.json <<'PY'
+          import json
+          import re
+          import sys
+          version, apk_name, digest, runner_temp, notes_path = sys.argv[1:]
+          if not re.fullmatch(r"\d+\.\d+\.\d+\+\d+", version):
+              raise SystemExit("Invalid release version.")
+          if not re.fullmatch(r"iraq-network-monitor-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.apk", apk_name):
+              raise SystemExit("Invalid APK file name.")
+          if not re.fullmatch(r"[a-f0-9]{64}", digest):
+              raise SystemExit("Invalid APK SHA-256.")
+          with open(notes_path, encoding="utf-8") as handle:
+              notes = json.load(handle)
+          notes_version = str(notes.get("latest_version", "")).strip()
+          if notes_version != version:
+              raise SystemExit(f"release_notes.json version {notes_version!r} does not match app version {version!r}.")
+          if not isinstance(notes.get("notes_ar"), list) or not notes["notes_ar"]:
+              raise SystemExit("release_notes.json must contain non-empty notes_ar.")
+          if not isinstance(notes.get("notes_en"), list) or not notes["notes_en"]:
+              raise SystemExit("release_notes.json must contain non-empty notes_en.")
+
+          common = {
+              "latest_version": version,
+              "sha256": digest,
+              "release_title": "تحديث مراقب شبكات العراق",
+          }
+          # Legacy manifest lets installed pre-signature builds migrate once.
+          legacy = {
+              **common,
+              "download_url": "https://mahmoudaljuorany.store/" + apk_name,
+          }
+          signed = {
+              **common,
+              "download_url": "https://mahmoudaljuorany.store/updates/iraq-network-monitor/" + apk_name,
+              "application_id": "com.example.abrj_iraq",
+              "platform": "android",
+              "release_title_ar": str(notes.get("title_ar", "تحديث مراقب شبكات العراق")),
+              "release_title_en": str(notes.get("title_en", "Iraq Network Monitor update")),
+              "release_notes": notes["notes_ar"],
+              "release_notes_ar": notes["notes_ar"],
+              "release_notes_en": notes["notes_en"],
+          }
+          with open(runner_temp + "/version.json", "w", encoding="utf-8") as handle:
+              json.dump(legacy, handle, ensure_ascii=False, indent=2)
+              handle.write("\n")
+          with open(runner_temp + "/monitor-update/version.json", "w", encoding="utf-8") as handle:
+              json.dump(signed, handle, ensure_ascii=False, indent=2)
+              handle.write("\n")
+          PY
+          echo "apk_name=$APK_NAME" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sign isolated update manifest with Ed25519
+        if: steps.release_gate.outputs.should_release == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          openssl pkeyutl -sign -rawin \
+            -inkey "$RUNNER_TEMP/monitor-update-private.pem" \
+            -in "$RUNNER_TEMP/monitor-update/version.json" \
+            -out "$RUNNER_TEMP/monitor-update/version.sig.bin"
+          base64 -w0 "$RUNNER_TEMP/monitor-update/version.sig.bin" > "$RUNNER_TEMP/monitor-update/version.json.sig"
+          openssl pkeyutl -verify -rawin -pubin \
+            -inkey "$RUNNER_TEMP/monitor-update-public.pem" \
+            -sigfile "$RUNNER_TEMP/monitor-update/version.sig.bin" \
+            -in "$RUNNER_TEMP/monitor-update/version.json"
+          test "$(wc -c < "$RUNNER_TEMP/monitor-update/version.json.sig")" -eq 88
+
+      - name: Check whether secure SFTP publishing is configured
+        if: steps.release_gate.outputs.should_release == 'true'
+        id: sftp_gate
+        shell: bash
+        env:
+          UPDATE_SFTP_HOST: ${{ secrets.UPDATE_SFTP_HOST }}
+          UPDATE_SFTP_PORT: ${{ secrets.UPDATE_SFTP_PORT }}
+          UPDATE_SFTP_USER: ${{ secrets.UPDATE_SFTP_USER }}
+          UPDATE_SFTP_PRIVATE_KEY: ${{ secrets.UPDATE_SFTP_PRIVATE_KEY }}
+          UPDATE_SFTP_KNOWN_HOSTS: ${{ secrets.UPDATE_SFTP_KNOWN_HOSTS }}
+          UPDATE_SFTP_PATH: ${{ secrets.UPDATE_SFTP_PATH }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in UPDATE_SFTP_HOST UPDATE_SFTP_PORT UPDATE_SFTP_USER UPDATE_SFTP_PRIVATE_KEY UPDATE_SFTP_KNOWN_HOSTS UPDATE_SFTP_PATH; do
+            [[ -n "${!name:-}" ]] || missing+=("$name")
+          done
+          if (( ${#missing[@]} > 0 )); then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Signed APK was built and saved as a GitHub artifact, but server publishing is not configured. Add these Actions secrets: ${missing[*]}."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip server publishing until SFTP credentials are configured
+        if: steps.release_gate.outputs.should_release == 'true' && steps.sftp_gate.outputs.configured != 'true'
+        run: echo "No files were sent to the update server. The signed APK remains available as a GitHub artifact."
+
+      - name: Publish signed APK and OTA manifests to update server (SFTP)
+        if: steps.release_gate.outputs.should_release == 'true' && steps.sftp_gate.outputs.configured == 'true'
+        shell: bash
+        env:
+          UPDATE_SFTP_HOST: ${{ secrets.UPDATE_SFTP_HOST }}
+          UPDATE_SFTP_PORT: ${{ secrets.UPDATE_SFTP_PORT }}
+          UPDATE_SFTP_USER: ${{ secrets.UPDATE_SFTP_USER }}
+          UPDATE_SFTP_PRIVATE_KEY: ${{ secrets.UPDATE_SFTP_PRIVATE_KEY }}
+          UPDATE_SFTP_KNOWN_HOSTS: ${{ secrets.UPDATE_SFTP_KNOWN_HOSTS }}
+          UPDATE_SFTP_PATH: ${{ secrets.UPDATE_SFTP_PATH }}
+          APK_NAME: ${{ steps.publish_metadata.outputs.apk_name }}
+          RELEASE_VERSION: ${{ steps.publish_metadata.outputs.version }}
+          EXPECTED_SHA256: ${{ steps.publish_metadata.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          for name in UPDATE_SFTP_HOST UPDATE_SFTP_PORT UPDATE_SFTP_USER UPDATE_SFTP_PRIVATE_KEY UPDATE_SFTP_KNOWN_HOSTS UPDATE_SFTP_PATH; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing GitHub Actions secret: $name"
+              echo "Add the SFTP secrets before publishing a release. No files were sent to the server."
+              exit 1
+            fi
+          done
+          [[ "$UPDATE_SFTP_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ "$UPDATE_SFTP_PORT" =~ ^[0-9]{1,5}$ ]]
+          (( UPDATE_SFTP_PORT >= 1 && UPDATE_SFTP_PORT <= 65535 ))
+          [[ "$UPDATE_SFTP_USER" =~ ^[A-Za-z0-9._-]+$ ]]
+          [[ "$UPDATE_SFTP_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]]
+          [[ "$UPDATE_SFTP_PATH" != *".."* ]]
+          [[ "$APK_NAME" =~ ^iraq-network-monitor-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.apk$ ]]
+          [[ "$EXPECTED_SHA256" =~ ^[a-f0-9]{64}$ ]]
+
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$UPDATE_SFTP_PRIVATE_KEY" > "$HOME/.ssh/ota_deploy_key"
+          printf '%s\n' "$UPDATE_SFTP_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/ota_deploy_key" "$HOME/.ssh/known_hosts"
+          ssh-keygen -lf "$HOME/.ssh/known_hosts" >/dev/null
+
+          APK_TMP=".$APK_NAME.tmp-$GITHUB_RUN_ID"
+          LEGACY_APK_TMP=".legacy-$APK_NAME.tmp-$GITHUB_RUN_ID"
+          NOTES_TMP=".release_notes.json.tmp-$GITHUB_RUN_ID"
+          VERSION_TMP=".version.json.tmp-$GITHUB_RUN_ID"
+          SIGNATURE_TMP=".version.json.sig.tmp-$GITHUB_RUN_ID"
+          CHANGELOG_TMP=".changelog.json.tmp-$GITHUB_RUN_ID"
+          MONITOR_DIR="$UPDATE_SFTP_PATH/iraq-network-monitor"
+          [[ "$UPDATE_SFTP_PATH" == "/incoming" ]] || { echo "UPDATE_SFTP_PATH must be /incoming for the isolated account."; exit 1; }
+
+          cat > "$RUNNER_TEMP/ota_publish.sftp" <<SFTP
+          -mkdir "$MONITOR_DIR"
+          -chmod 2750 "$MONITOR_DIR"
+          put build/app/outputs/flutter-apk/app-release.apk "$UPDATE_SFTP_PATH/$LEGACY_APK_TMP"
+          put build/app/outputs/flutter-apk/app-release.apk "$MONITOR_DIR/$APK_TMP"
+          put release_notes.json "$UPDATE_SFTP_PATH/$NOTES_TMP"
+          put release_notes.json "$MONITOR_DIR/$NOTES_TMP"
+          put changelog.json "$UPDATE_SFTP_PATH/$CHANGELOG_TMP"
+          put changelog.json "$MONITOR_DIR/$CHANGELOG_TMP"
+          put "$RUNNER_TEMP/version.json" "$UPDATE_SFTP_PATH/$VERSION_TMP"
+          put "$RUNNER_TEMP/monitor-update/version.json" "$MONITOR_DIR/$VERSION_TMP"
+          put "$RUNNER_TEMP/monitor-update/version.json.sig" "$MONITOR_DIR/$SIGNATURE_TMP"
+          rename "$UPDATE_SFTP_PATH/$LEGACY_APK_TMP" "$UPDATE_SFTP_PATH/$APK_NAME"
+          rename "$MONITOR_DIR/$APK_TMP" "$MONITOR_DIR/$APK_NAME"
+          rename "$UPDATE_SFTP_PATH/$NOTES_TMP" "$UPDATE_SFTP_PATH/release_notes.json"
+          rename "$MONITOR_DIR/$NOTES_TMP" "$MONITOR_DIR/release_notes.json"
+          rename "$UPDATE_SFTP_PATH/$CHANGELOG_TMP" "$UPDATE_SFTP_PATH/changelog.json"
+          rename "$MONITOR_DIR/$CHANGELOG_TMP" "$MONITOR_DIR/changelog.json"
+          rename "$MONITOR_DIR/$SIGNATURE_TMP" "$MONITOR_DIR/version.json.sig"
+          rename "$UPDATE_SFTP_PATH/$VERSION_TMP" "$UPDATE_SFTP_PATH/version.json"
+          rename "$MONITOR_DIR/$VERSION_TMP" "$MONITOR_DIR/version.json"
+          SFTP
+
+          # Keep the root manifest temporarily for installed pre-signature builds.
+          # New versions only read the signed app-specific path below.
+          sftp -b "$RUNNER_TEMP/ota_publish.sftp" -P "$UPDATE_SFTP_PORT" -i "$HOME/.ssh/ota_deploy_key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" -o ConnectTimeout=20 \
+            "$UPDATE_SFTP_USER@$UPDATE_SFTP_HOST"
+
+          curl --fail --silent --show-error --max-redirs 0 --max-time 30 \
+            -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+            'https://mahmoudaljuorany.store/version.json' -o "$RUNNER_TEMP/published-legacy-version.json"
+          cmp "$RUNNER_TEMP/version.json" "$RUNNER_TEMP/published-legacy-version.json"
+
+          curl --fail --silent --show-error --max-redirs 0 --max-time 30 \
+            -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+            'https://mahmoudaljuorany.store/updates/iraq-network-monitor/version.json' -o "$RUNNER_TEMP/published-version.json"
+          cmp "$RUNNER_TEMP/monitor-update/version.json" "$RUNNER_TEMP/published-version.json"
+
+          curl --fail --silent --show-error --max-redirs 0 --max-time 30 \
+            -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+            'https://mahmoudaljuorany.store/updates/iraq-network-monitor/version.json.sig' -o "$RUNNER_TEMP/published-version.json.sig"
+          cmp "$RUNNER_TEMP/monitor-update/version.json.sig" "$RUNNER_TEMP/published-version.json.sig"
+          # The server stores the signature as base64 text; OpenSSL verifies the 64-byte raw Ed25519 signature.
+          base64 --decode "$RUNNER_TEMP/published-version.json.sig" > "$RUNNER_TEMP/published-version.sig.bin"
+          test "$(wc -c < "$RUNNER_TEMP/published-version.sig.bin")" -eq 64
+          openssl pkeyutl -verify -rawin -pubin \
+            -inkey "$RUNNER_TEMP/monitor-update-public.pem" \
+            -sigfile "$RUNNER_TEMP/published-version.sig.bin" \
+            -in "$RUNNER_TEMP/published-version.json"
+
+          # Optional metadata must not block delivery to legacy app builds.
+          for url in \
+            'https://mahmoudaljuorany.store/release_notes.json' \
+            'https://mahmoudaljuorany.store/updates/iraq-network-monitor/release_notes.json'; do
+            status="$(curl --silent --show-error --max-redirs 0 --max-time 30 \
+              -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+              -w '%{http_code}' "$url" -o "$RUNNER_TEMP/published-release-notes.json")"
+            case "$status" in
+              200) cmp release_notes.json "$RUNNER_TEMP/published-release-notes.json" ;;
+              404) echo "Optional release notes unavailable at $url; continuing." ;;
+              *) echo "Unexpected HTTP $status checking release notes at $url"; exit 1 ;;
+            esac
+          done
+
+          for url in \
+            'https://mahmoudaljuorany.store/changelog.json' \
+            'https://mahmoudaljuorany.store/updates/iraq-network-monitor/changelog.json'; do
+            status="$(curl --silent --show-error --max-redirs 0 --max-time 30 \
+              -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+              -w '%{http_code}' "$url" -o "$RUNNER_TEMP/published-changelog.json")"
+            case "$status" in
+              200) cmp changelog.json "$RUNNER_TEMP/published-changelog.json" ;;
+              404) echo "Optional changelog unavailable at $url; continuing." ;;
+              *) echo "Unexpected HTTP $status checking changelog at $url"; exit 1 ;;
+            esac
+          done
+
+          for url in \
+            "https://mahmoudaljuorany.store/$APK_NAME" \
+            "https://mahmoudaljuorany.store/updates/iraq-network-monitor/$APK_NAME"; do
+            curl --fail --silent --show-error --max-redirs 0 --max-time 180 \
+              -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "$url" \
+              -o "$RUNNER_TEMP/published-release.apk"
+            PUBLISHED_SHA256="$(sha256sum "$RUNNER_TEMP/published-release.apk" | awk '{print $1}')"
+            test "$PUBLISHED_SHA256" = "$EXPECTED_SHA256" || {
+              echo "Published APK bytes do not match the signed build checksum."
+              exit 1
+            }
+          done
+          echo "Published and verified isolated signed update $RELEASE_VERSION ($APK_NAME), SHA-256 $EXPECTED_SHA256."
+
+      - name: Remove temporary signing material
+        if: always()
+        run: rm -f android/key.properties android/app/upload-keystore.jks "$RUNNER_TEMP/monitor-update-private.pem" "$RUNNER_TEMP/monitor-update-public.pem" "$RUNNER_TEMP/monitor-update/version.sig.bin"
