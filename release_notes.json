@@ -1,13 +1,13 @@
 {
-  "latest_version": "1.0.28+31",
+  "latest_version": "1.0.29+32",
   "notes_ar": [
-    "إضافة إعداد لتحديد مستوى ضعف إشارة RSRP الذي يطلق التنبيه من ‎-120 إلى ‎-90 dBm.",
-    "حفظ مستوى التنبيه المختار حتى بعد إغلاق التطبيق وإعادة تشغيله.",
-    "إضافة هامش ثبات لمنع تكرار التنبيهات بسبب تذبذب الإشارة البسيط."
+    "إضافة تحليل لسجل القياسات مع اختيار آخر 15 دقيقة أو آخر ساعة أو كامل السجل.",
+    "عرض عدد القراءات ومتوسط RSRP وأضعف وأقوى RSRP ومتوسط SINR وعدد الخلايا المختلفة.",
+    "حساب الإحصاءات من القيم المتاحة فقط مع إبقاء القراءات الأصلية دون تعديل."
   ],
   "notes_en": [
-    "Add a configurable RSRP weak-signal alert threshold from -120 to -90 dBm.",
-    "Persist the selected alert threshold across app restarts.",
-    "Add signal hysteresis to prevent repeated alerts from minor fluctuations."
+    "Add measurement-history analytics with 15-minute, 1-hour, and all-history filters.",
+    "Show reading count, average RSRP, weakest and strongest RSRP, average SINR, and distinct cell count.",
+    "Calculate statistics only from available values while preserving the original measurements."
   ]
 }
