@@ -35,6 +35,25 @@ void main() {
     }
   });
 
+  testWidgets('History tab shows analytics and lets the user change time range', (WidgetTester tester) async {
+    await tester.pumpWidget(const MyApp());
+
+    await tester.tap(find.text('السجل'));
+    await tester.pump();
+
+    expect(find.text('تحليل سجل القياسات'), findsOneWidget);
+    final fifteenMinutes = find.widgetWithText(ChoiceChip, '15 دقيقة');
+    final allHistory = find.widgetWithText(ChoiceChip, 'كل السجل');
+    expect(fifteenMinutes, findsOneWidget);
+    expect(tester.widget<ChoiceChip>(allHistory).selected, isTrue);
+
+    await tester.tap(fifteenMinutes);
+    await tester.pump();
+
+    expect(tester.widget<ChoiceChip>(fifteenMinutes).selected, isTrue);
+    expect(tester.widget<ChoiceChip>(allHistory).selected, isFalse);
+  });
+
   testWidgets('Update control remains reachable in compact settings', (WidgetTester tester) async {
     tester.view.physicalSize = const Size(320, 640);
     tester.view.devicePixelRatio = 1;
