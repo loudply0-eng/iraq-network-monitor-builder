@@ -14,6 +14,7 @@ import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'services/network_alert_rules.dart';
 import 'services/update_manifest_verifier.dart';
 
 class _UpdateSizeLimitException implements Exception {
@@ -25,6 +26,9 @@ class AppPreferences {
   static final ValueNotifier<ThemeMode> themeMode = ValueNotifier<ThemeMode>(ThemeMode.dark);
   static final ValueNotifier<int> accentIndex = ValueNotifier<int>(0);
   static final ValueNotifier<bool> networkAlertsEnabled = ValueNotifier<bool>(false);
+  static final ValueNotifier<int> networkAlertRsrpThreshold = ValueNotifier<int>(
+    NetworkAlertRules.defaultRsrpThresholdDbm,
+  );
 
   static const List<Color> accentColors = <Color>[
     Color(0xFF16BCEB), Color(0xFF3B82F6), Color(0xFF8B5CF6),
@@ -59,6 +63,11 @@ class AppPreferences {
         .clamp(0, accentColors.length - 1).toInt();
     accentIndex.value = savedAccent;
     networkAlertsEnabled.value = data['networkAlertsEnabled'] == true;
+    final savedRsrpThreshold =
+        (data['networkAlertRsrpThreshold'] as num?)?.toInt() ??
+            NetworkAlertRules.defaultRsrpThresholdDbm;
+    networkAlertRsrpThreshold.value =
+        NetworkAlertRules.clampThreshold(savedRsrpThreshold);
   }
 
   static Future<void> _save(String key, Object value) async {
@@ -96,6 +105,15 @@ class AppPreferences {
   static Future<void> setNetworkAlertsEnabled(bool value) async {
     networkAlertsEnabled.value = value;
     await _save('networkAlertsEnabled', value);
+  }
+
+  static void previewNetworkAlertRsrpThreshold(int value) {
+    networkAlertRsrpThreshold.value = NetworkAlertRules.clampThreshold(value);
+  }
+
+  static Future<void> setNetworkAlertRsrpThreshold(int value) async {
+    previewNetworkAlertRsrpThreshold(value);
+    await _save('networkAlertRsrpThreshold', networkAlertRsrpThreshold.value);
   }
 }
 
@@ -160,6 +178,7 @@ class MyApp extends StatelessWidget {
           AppPreferences.themeMode,
           AppPreferences.accentIndex,
           AppPreferences.networkAlertsEnabled,
+          AppPreferences.networkAlertRsrpThreshold,
         ]),
         builder: (context, _) {
           final accent = AppPreferences.accentColors[AppPreferences.accentIndex.value];
@@ -218,7 +237,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               _aboutFeature(Icons.wifi, tr('فحص شبكات Wi-Fi القريبة ومعلوماتها المتاحة', 'Scan nearby Wi-Fi networks and available details')),
               _aboutFeature(Icons.history, tr('حفظ سجل القراءات ومراجعة القياسات السابقة', 'Save signal history and review previous measurements')),
               _aboutFeature(Icons.route, tr('أدوات القياس الميداني وحساب القنوات وفقد المسار', 'Field-testing tools, channel calculations and path loss')),
-              _aboutFeature(Icons.notifications_active_outlined, tr('تنبيهات تغيّر الشبكة وضعف الإشارة أثناء تشغيل التطبيق', 'Network-change and weak-signal alerts while the app is running')),
+              _aboutFeature(Icons.notifications_active_outlined, tr('تنبيهات تغيّر الشبكة مع إمكانية تخصيص حد ضعف الإشارة أثناء تشغيل التطبيق', 'Network-change alerts with a configurable weak-signal threshold while the app is running')),
               _aboutFeature(Icons.system_update_alt, tr('تحديثات موقّعة مع التحقق من سلامة ملف التحديث', 'Signed updates with package integrity verification')),
               const SizedBox(height: 12),
               Text(tr('ملاحظة: البيانات والقراءات تعتمد على صلاحيات أندرويد وموديل الهاتف وشركة الاتصالات؛ لذلك قد لا تتوفر كل المؤشرات على جميع الأجهزة.',
@@ -413,31 +432,87 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               ),
               ValueListenableBuilder<bool>(
                 valueListenable: AppPreferences.networkAlertsEnabled,
-                builder: (context, enabled, _) => SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  secondary: Icon(Icons.notifications_active_outlined,
-                      color: Theme.of(context).colorScheme.primary),
-                  title: Text(english ? 'Network alerts' : 'تنبيهات الشبكة'),
-                  subtitle: Text(english
-                      ? 'While the app is open: signal drops, cell changes and 5G detection'
-                      : 'أثناء فتح التطبيق: ضعف الإشارة وتغيّر البرج واكتشاف 5G'),
-                  value: enabled,
-                  onChanged: (value) async {
-                    if (value) {
-                      final permission = await Permission.notification.request();
-                      if (!permission.isGranted) {
-                        if (sheetContext.mounted) {
-                          ScaffoldMessenger.of(sheetContext).showSnackBar(
-                            SnackBar(content: Text(english
-                                ? 'Allow notifications in Android settings to enable alerts.'
-                                : 'اسمح بالإشعارات من إعدادات أندرويد لتفعيل التنبيهات.')),
-                          );
+                builder: (context, enabled, _) => Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      secondary: Icon(Icons.notifications_active_outlined,
+                          color: Theme.of(context).colorScheme.primary),
+                      title: Text(english ? 'Network alerts' : 'تنبيهات الشبكة'),
+                      subtitle: Text(english
+                          ? 'While the app is open: signal drops, cell changes and 5G detection'
+                          : 'أثناء فتح التطبيق: ضعف الإشارة وتغيّر البرج واكتشاف 5G'),
+                      value: enabled,
+                      onChanged: (value) async {
+                        if (value) {
+                          final permission = await Permission.notification.request();
+                          if (!permission.isGranted) {
+                            if (sheetContext.mounted) {
+                              ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                SnackBar(content: Text(english
+                                    ? 'Allow notifications in Android settings to enable alerts.'
+                                    : 'اسمح بالإشعارات من إعدادات أندرويد لتفعيل التنبيهات.')),
+                              );
+                            }
+                            return;
+                          }
                         }
-                        return;
-                      }
-                    }
-                    await AppPreferences.setNetworkAlertsEnabled(value);
-                  },
+                        await AppPreferences.setNetworkAlertsEnabled(value);
+                      },
+                    ),
+                    if (enabled)
+                      ValueListenableBuilder<int>(
+                        valueListenable: AppPreferences.networkAlertRsrpThreshold,
+                        builder: (context, threshold, _) => Padding(
+                          padding: const EdgeInsetsDirectional.only(
+                              start: 44, end: 8, bottom: 10),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      english
+                                          ? 'Weak-signal alert threshold (RSRP)'
+                                          : 'حد تنبيه ضعف الإشارة (RSRP)',
+                                      style: Theme.of(context).textTheme.bodyMedium,
+                                    ),
+                                  ),
+                                  Text(
+                                    '$threshold dBm',
+                                    style: const TextStyle(fontWeight: FontWeight.w800),
+                                  ),
+                                ],
+                              ),
+                              Text(
+                                english
+                                    ? 'Notify when RSRP reaches this value or lower.'
+                                    : 'يصدر التنبيه عندما تصل قراءة RSRP إلى هذه القيمة أو أقل.',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                              Slider(
+                                min: NetworkAlertRules.minRsrpThresholdDbm.toDouble(),
+                                max: NetworkAlertRules.maxRsrpThresholdDbm.toDouble(),
+                                divisions: NetworkAlertRules.rsrpThresholdSteps,
+                                value: threshold.toDouble(),
+                                label: '$threshold dBm',
+                                onChanged: (value) =>
+                                    AppPreferences.previewNetworkAlertRsrpThreshold(
+                                  value.round(),
+                                ),
+                                onChangeEnd: (value) {
+                                  AppPreferences.setNetworkAlertRsrpThreshold(
+                                    value.round(),
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
               const SizedBox(height: 8),
@@ -1583,10 +1658,11 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       ));
     }
 
-    if (lastObservedRsrp != null &&
-        currentRsrp != null &&
-        lastObservedRsrp! > -105 &&
-        currentRsrp <= -110) {
+    if (NetworkAlertRules.shouldNotifyForRsrpDrop(
+      previousRsrp: lastObservedRsrp,
+      currentRsrp: currentRsrp,
+      thresholdDbm: AppPreferences.networkAlertRsrpThreshold.value,
+    )) {
       messages.add(tr(
         'تدهورت قوة الإشارة إلى $currentRsrp dBm.',
         'Signal dropped to $currentRsrp dBm.',

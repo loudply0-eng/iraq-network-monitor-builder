@@ -1,13 +1,13 @@
 {
-  "latest_version": "1.0.27+30",
+  "latest_version": "1.0.28+31",
   "notes_ar": [
-    "إظهار نافذة التحديث تلقائياً عند اكتشاف إصدار جديد، مع سجل التغييرات وخيار التنزيل والتثبيت.",
-    "الإبقاء على زر تحديث التطبيق وفحص التحديثات داخل الإعدادات.",
-    "منع تكرار نافذة التحديث أكثر من مرة خلال جلسة التطبيق."
+    "إضافة إعداد لتحديد مستوى ضعف إشارة RSRP الذي يطلق التنبيه من ‎-120 إلى ‎-90 dBm.",
+    "حفظ مستوى التنبيه المختار حتى بعد إغلاق التطبيق وإعادة تشغيله.",
+    "إضافة هامش ثبات لمنع تكرار التنبيهات بسبب تذبذب الإشارة البسيط."
   ],
   "notes_en": [
-    "Automatically show the update dialog when a new release is detected, with release notes and download/install action.",
-    "Keep the app update and check button available in Settings.",
-    "Avoid showing the automatic update dialog more than once per app session."
+    "Add a configurable RSRP weak-signal alert threshold from -120 to -90 dBm.",
+    "Persist the selected alert threshold across app restarts.",
+    "Add signal hysteresis to prevent repeated alerts from minor fluctuations."
   ]
 }
