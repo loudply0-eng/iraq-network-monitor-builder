@@ -1,6 +1,20 @@
 {
-  "latest_version": "1.0.29+32",
+  "latest_version": "1.0.30+33",
   "releases": [
+    {
+      "version": "1.0.30+33",
+      "date": "2026-11-28",
+      "notes_ar": [
+        "تطوير أداة تشخيص الاتصال لتفحص ثلاثة خوادم مستقلة: Cloudflare وGoogle وQuad9.",
+        "تنفيذ ثلاث محاولات TCP لكل وجهة وعرض المتوسط والأدنى والأعلى وتذبذب زمن الاتصال ونسبة النجاح.",
+        "توضيح أن القياس هو زمن إنشاء اتصال TCP وليس اختبار ICMP Ping أو سرعة التنزيل والرفع."
+      ],
+      "notes_en": [
+        "Expand connection diagnostics to test three independent endpoints: Cloudflare, Google and Quad9.",
+        "Run three TCP connection attempts per endpoint and show average, minimum, maximum, latency variation and success rate.",
+        "Clarify that the measurement is TCP connection setup time, not ICMP ping or download/upload throughput."
+      ]
+    },
     {
       "version": "1.0.29+32",
       "date": "2026-11-27",
