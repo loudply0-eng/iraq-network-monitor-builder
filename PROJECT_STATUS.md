@@ -1,6 +1,6 @@
 # Iraq Network Monitor — Active Build and Release Status
 
-Last repository audit: 2026-11-27 (Asia/Baghdad).
+Last repository audit: 2026-11-28 (Asia/Baghdad).
 
 This is the canonical hand-off document for future development sessions. The public repository below is the active application source, CI, signing, and production-release path. Do not switch production builds to another repository or create a parallel release path without an explicit migration plan.
 
@@ -8,14 +8,31 @@ This is the canonical hand-off document for future development sessions. The pub
 
 - Repository: `loudply0-eng/iraq-network-monitor-builder`
 - Default branch: `main`
-- Audited application source commit: `caa01f557828f3598d4cd10081209c1d5ea8cde3` (2026-11-27; release source for `1.0.28+31`).
-- App version recorded in `pubspec.yaml`, `release_notes.json`, and `changelog.json`: `1.0.28+31`.
+- Audited application source commit: `21d7710e6441af3e1b236baf729ea90b52e89ebb` (2026-11-28; release source for `1.0.29+32`).
+- App version recorded in `pubspec.yaml`, `release_notes.json`, and `changelog.json`: `1.0.29+32`.
 - Android application ID: `com.example.abrj_iraq`.
 - Flutter SDK: `3.50.0`, pinned to official source commit `ab2912035e160d9cad6306df307576da6128ebdb`.
 - Java: 17.
 - All active CI/build/release operations are intended to run from this public repository. The private repository's Actions quota was exhausted; do not trigger its workflows or move builds back there.
 
 ## Confirmed release history
+
+### Current production release — 1.0.29+32
+
+- Public builder Actions run #161, run ID `46104549770`, source commit `21d7710e6441af3e1b236baf729ea90b52e89ebb`.
+- Completed successfully on 2026-11-28.
+- PR #26 added time-filtered signal-history analytics and was merged after PR CI run #160 (run ID `46062099367`) passed Flutter analysis, widget/unit tests, and the CI-only unsigned debug build.
+- The trusted production run passed Flutter analysis and tests, release gating, original Android keystore validation, separate OTA signing-key validation, signed release APK build, APK signer identity validation, Ed25519 manifest signing, SFTP publication, public manifest/signature verification, and downloaded APK SHA-256 verification from both public paths.
+- APK filename: `iraq-network-monitor-1.0.29-32.apk`.
+- APK size: approximately 51.0 MB.
+- Published direct APK: `https://mahmoudaljuorany.store/iraq-network-monitor-1.0.29-32.apk`.
+- Published app-specific OTA APK: `https://mahmoudaljuorany.store/updates/iraq-network-monitor/iraq-network-monitor-1.0.29-32.apk`.
+- Legacy manifest: `https://mahmoudaljuorany.store/version.json`.
+- App-specific manifest: `https://mahmoudaljuorany.store/updates/iraq-network-monitor/version.json`.
+- App-specific Ed25519 signature: `https://mahmoudaljuorany.store/updates/iraq-network-monitor/version.json.sig`.
+- Published APK SHA-256: `18f635126a0e0ddbd46a7ff4c4c09cefeab330b1195dbf876a4ceb1761f1bf32`.
+- The APK certificate matched the established production certificate fingerprint below. The workflow also verified the signed app-specific manifest and downloaded APK hashes from both public paths.
+- Treat run #161 as the current confirmed production release.
 
 ### Production release — 1.0.28+31
 
@@ -31,7 +48,7 @@ This is the canonical hand-off document for future development sessions. The pub
 - App-specific Ed25519 signature: `https://mahmoudaljuorany.store/updates/iraq-network-monitor/version.json.sig`.
 - Published APK SHA-256: `0ac456daaae8447a216bacfcd451057344714458eee64689a8f0b7ea3010d6f3`.
 - The APK certificate matched the established production certificate fingerprint below. The workflow also verified the signed manifest and downloaded APK hashes from both public paths.
-- Treat run #148 as the current confirmed production release.
+- Superseded by production release `1.0.29+32`; retained here as release history.
 
 ### CI run for the release change — not a release
 
@@ -97,6 +114,7 @@ The current audited application source includes:
 - Street, satellite, and terrain map layers with map attribution.
 - GPS measurement route and signal heatmap.
 - Signal history and measurement records.
+- Signal-history analytics with 15-minute, 1-hour, and all-history filters; reading count; valid-sample counts; average, weakest, and strongest RSRP; average SINR; and distinct-cell count. Missing/invalid measurements are excluded rather than estimated.
 - CSV copy/export and KML export for Google Earth.
 - Path-loss and TCP-latency measurement tools.
 
@@ -135,7 +153,7 @@ Device-dependent cellular fields are not guaranteed on every Android build, mode
 1. Continue all development, CI, signing, and production releases exclusively through this public repository while the private Actions quota is exhausted.
 2. Preserve the current feature set and production signing identities.
 3. Reconcile any proposed application-source changes against the current `main` before editing; do not import an older application snapshot over the active code.
-4. For the next real app release, update the app, tests, `pubspec.yaml`, Arabic/English release notes, and changelog together, then run the full trusted release pipeline.
+4. For the next real app release after `1.0.29+32`, update the app, tests, `pubspec.yaml`, Arabic/English release notes, and changelog together, then run the full trusted release pipeline.
 5. Inspect the final Actions run and publicly downloaded APK/manifest checks before declaring a release complete.
 
 ## Resume instructions
