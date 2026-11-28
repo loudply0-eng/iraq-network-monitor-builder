@@ -1,13 +1,13 @@
 {
-  "latest_version": "1.0.29+32",
+  "latest_version": "1.0.30+33",
   "notes_ar": [
-    "إضافة تحليل لسجل القياسات مع اختيار آخر 15 دقيقة أو آخر ساعة أو كامل السجل.",
-    "عرض عدد القراءات ومتوسط RSRP وأضعف وأقوى RSRP ومتوسط SINR وعدد الخلايا المختلفة.",
-    "حساب الإحصاءات من القيم المتاحة فقط مع إبقاء القراءات الأصلية دون تعديل."
+    "تطوير أداة تشخيص الاتصال لتفحص ثلاثة خوادم مستقلة: Cloudflare وGoogle وQuad9.",
+    "تنفيذ ثلاث محاولات TCP لكل وجهة وعرض المتوسط والأدنى والأعلى وتذبذب زمن الاتصال ونسبة النجاح.",
+    "توضيح أن القياس هو زمن إنشاء اتصال TCP وليس اختبار ICMP Ping أو سرعة التنزيل والرفع."
   ],
   "notes_en": [
-    "Add measurement-history analytics with 15-minute, 1-hour, and all-history filters.",
-    "Show reading count, average RSRP, weakest and strongest RSRP, average SINR, and distinct cell count.",
-    "Calculate statistics only from available values while preserving the original measurements."
+    "Expand connection diagnostics to test three independent endpoints: Cloudflare, Google and Quad9.",
+    "Run three TCP connection attempts per endpoint and show average, minimum, maximum, latency variation and success rate.",
+    "Clarify that the measurement is TCP connection setup time, not ICMP ping or download/upload throughput."
   ]
 }
