@@ -15,6 +15,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'services/network_alert_rules.dart';
+import 'services/signal_history_analytics.dart';
 import 'services/update_manifest_verifier.dart';
 
 class _UpdateSizeLimitException implements Exception {
@@ -236,6 +237,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               _aboutFeature(Icons.signal_cellular_alt, tr('قراءات الإشارة مثل RSRP وRSRQ وRSSI وSINR حسب دعم الجهاز', 'Signal metrics such as RSRP, RSRQ, RSSI and SINR when supported by the device')),
               _aboutFeature(Icons.wifi, tr('فحص شبكات Wi-Fi القريبة ومعلوماتها المتاحة', 'Scan nearby Wi-Fi networks and available details')),
               _aboutFeature(Icons.history, tr('حفظ سجل القراءات ومراجعة القياسات السابقة', 'Save signal history and review previous measurements')),
+              _aboutFeature(Icons.analytics_outlined, tr('تحليل سجل القياسات ومتوسطات الإشارة حسب الفترة الزمنية', 'Analyze measurement history and signal averages by time range')),
               _aboutFeature(Icons.route, tr('أدوات القياس الميداني وحساب القنوات وفقد المسار', 'Field-testing tools, channel calculations and path loss')),
               _aboutFeature(Icons.notifications_active_outlined, tr('تنبيهات تغيّر الشبكة مع إمكانية تخصيص حد ضعف الإشارة أثناء تشغيل التطبيق', 'Network-change alerts with a configurable weak-signal threshold while the app is running')),
               _aboutFeature(Icons.system_update_alt, tr('تحديثات موقّعة مع التحقق من سلامة ملف التحديث', 'Signed updates with package integrity verification')),
@@ -587,6 +589,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   Timer? signalTimer;
   final List<int> signalHistory = <int>[];
   final List<Map<String, dynamic>> readingHistory = <Map<String, dynamic>>[];
+  SignalHistoryWindow selectedHistoryWindow = SignalHistoryWindow.all;
   final MapController mapController = MapController();
   LatLng? currentPosition;
   DateTime? lastGpsSampleAt;
@@ -3196,7 +3199,133 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     );
   }
 
+  Widget _historyStatistic(String label, String value) => Container(
+    padding: const EdgeInsets.all(11),
+    decoration: BoxDecoration(
+      color: subPanelColor,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: accentColor.withValues(alpha: 0.16)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: TextStyle(color: mutedTextColor, fontSize: 11)),
+        const SizedBox(height: 5),
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: primaryTextColor, fontSize: 17, fontWeight: FontWeight.w800),
+        ),
+      ],
+    ),
+  );
+
+  Widget _historyAnalyticsCard() {
+    final visible = SignalHistoryAnalytics.filterByWindow(
+      records: readingHistory,
+      window: selectedHistoryWindow,
+    );
+    final summary = SignalHistoryAnalytics.summarize(visible);
+    final tiles = <Widget>[
+      _historyStatistic(tr('عدد القراءات', 'Readings'), summary.readingCount.toString()),
+      _historyStatistic(
+        tr('متوسط RSRP · ${summary.rsrpSampleCount} عينة', 'Average RSRP · ${summary.rsrpSampleCount} samples'),
+        summary.averageRsrp == null ? '—' : '${summary.averageRsrp!.toStringAsFixed(1)} dBm',
+      ),
+      _historyStatistic(
+        tr('أضعف RSRP', 'Weakest RSRP'),
+        summary.weakestRsrp == null ? '—' : '${summary.weakestRsrp} dBm',
+      ),
+      _historyStatistic(
+        tr('أقوى RSRP', 'Strongest RSRP'),
+        summary.strongestRsrp == null ? '—' : '${summary.strongestRsrp} dBm',
+      ),
+      _historyStatistic(
+        tr('متوسط SINR · ${summary.sinrSampleCount} عينة', 'Average SINR · ${summary.sinrSampleCount} samples'),
+        summary.averageSinr == null ? '—' : '${summary.averageSinr!.toStringAsFixed(1)} dB',
+      ),
+      _historyStatistic(tr('الخلايا المختلفة', 'Distinct cells'), summary.distinctCellCount.toString()),
+    ];
+
+    return Card(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.analytics_outlined, color: accentColor),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    tr('تحليل سجل القياسات', 'Measurement analytics'),
+                    style: TextStyle(color: primaryTextColor, fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 7,
+              runSpacing: 4,
+              children: [
+                ChoiceChip(
+                  label: Text(tr('15 دقيقة', '15 min')),
+                  selected: selectedHistoryWindow == SignalHistoryWindow.minutes15,
+                  onSelected: (selected) {
+                    if (selected) setState(() => selectedHistoryWindow = SignalHistoryWindow.minutes15);
+                  },
+                ),
+                ChoiceChip(
+                  label: Text(tr('ساعة', '1 hour')),
+                  selected: selectedHistoryWindow == SignalHistoryWindow.hour1,
+                  onSelected: (selected) {
+                    if (selected) setState(() => selectedHistoryWindow = SignalHistoryWindow.hour1);
+                  },
+                ),
+                ChoiceChip(
+                  label: Text(tr('كل السجل', 'All history')),
+                  selected: selectedHistoryWindow == SignalHistoryWindow.all,
+                  onSelected: (selected) {
+                    if (selected) setState(() => selectedHistoryWindow = SignalHistoryWindow.all);
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 7),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final columns = constraints.maxWidth >= 520 ? 3 : 2;
+                final tileWidth = (constraints.maxWidth - (columns - 1) * 8) / columns;
+                return Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: tiles.map((tile) => SizedBox(width: tileWidth, child: tile)).toList(),
+                );
+              },
+            ),
+            const SizedBox(height: 7),
+            Text(
+              tr(
+                'المتوسطات تُحسب من القراءات المتاحة فقط؛ لا يتم تخمين القيم الناقصة.',
+                'Averages use only available readings; missing values are never estimated.',
+              ),
+              style: TextStyle(color: mutedTextColor, fontSize: 10),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget buildHistoryTab() {
+    final visibleHistory = SignalHistoryAnalytics.filterByWindow(
+      records: readingHistory,
+      window: selectedHistoryWindow,
+    );
     return Column(
       children: [
         Padding(
@@ -3237,31 +3366,41 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             ],
           ),
         ),
+        _historyAnalyticsCard(),
         Expanded(
           child: readingHistory.isEmpty
               ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.history, size: 48, color: mutedTextColor),
-                      const SizedBox(height: 10),
-                      Text(tr('لا توجد قياسات محفوظة بعد', 'No measurements saved yet'),
-                          style: TextStyle(color: mutedTextColor)),
-                      const SizedBox(height: 10),
-                      OutlinedButton.icon(
-                        onPressed: () => setState(() => selectedTab = 0),
-                        icon: const Icon(Icons.network_cell),
-                        label: Text(tr('اذهب إلى تبويب الشبكة', 'Go to Network tab')),
-                      ),
-                    ],
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.history, size: 24, color: mutedTextColor),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            tr('لا توجد قياسات محفوظة بعد. اقرأ الإشارة لبدء السجل.', 'No measurements saved yet. Read the signal to start the history.'),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: mutedTextColor),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 )
-              : ListView.separated(
+              : visibleHistory.isEmpty
+                  ? Center(
+                      child: Text(
+                        tr('لا توجد قراءات ضمن هذه الفترة.', 'No readings in this time range.'),
+                        style: TextStyle(color: mutedTextColor),
+                      ),
+                    )
+                  : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(12, 4, 12, 18),
-                  itemCount: readingHistory.length,
+                  itemCount: visibleHistory.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 7),
                   itemBuilder: (context, index) {
-                    final item = readingHistory[index];
+                    final item = visibleHistory[index];
                     final radio = item['radioTech']?.toString() ?? item['network']?.toString() ?? '—';
                     final cell = item['cellId']?.toString() ?? '—';
                     final pci = item['pci']?.toString() ?? '—';

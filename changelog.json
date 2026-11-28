@@ -1,6 +1,20 @@
 {
-  "latest_version": "1.0.28+31",
+  "latest_version": "1.0.29+32",
   "releases": [
+    {
+      "version": "1.0.29+32",
+      "date": "2026-11-27",
+      "notes_ar": [
+        "إضافة تحليل لسجل القياسات مع اختيار آخر 15 دقيقة أو آخر ساعة أو كامل السجل.",
+        "عرض عدد القراءات ومتوسط RSRP وأضعف وأقوى RSRP ومتوسط SINR وعدد الخلايا المختلفة.",
+        "حساب الإحصاءات من القيم المتاحة فقط مع إبقاء القراءات الأصلية دون تعديل."
+      ],
+      "notes_en": [
+        "Add measurement-history analytics with 15-minute, 1-hour, and all-history filters.",
+        "Show reading count, average RSRP, weakest and strongest RSRP, average SINR, and distinct cell count.",
+        "Calculate statistics only from available values while preserving the original measurements."
+      ]
+    },
     {
       "version": "1.0.28+31",
       "date": "2026-11-27",
