@@ -15,6 +15,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'services/network_alert_rules.dart';
+import 'services/network_diagnostics.dart';
 import 'services/signal_history_analytics.dart';
 import 'services/update_manifest_verifier.dart';
 
@@ -617,6 +618,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   String pathLossResult = '';
   bool testingTcpLatency = false;
   String tcpLatencyResult = '';
+  List<TcpEndpointResult> tcpEndpointResults = <TcpEndpointResult>[];
   bool showHeatmap = false;
   bool showDriveTest = true;
   int mapStyleIndex = 0;
@@ -2364,27 +2366,59 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     if (testingTcpLatency) return;
     setState(() {
       testingTcpLatency = true;
-      tcpLatencyResult = tr('جاري فحص اتصال TCP...', 'Testing TCP connection...');
+      tcpLatencyResult = tr(
+        'يتم فحص 3 وجهات، بثلاث محاولات لكل وجهة...',
+        'Testing 3 endpoints with 3 attempts per endpoint...',
+      );
+      tcpEndpointResults = <TcpEndpointResult>[];
     });
-    final samples = <int>[];
+
     try {
-      for (var i = 0; i < 3; i++) {
-        final stopwatch = Stopwatch()..start();
-        final socket = await Socket.connect(
-          '1.1.1.1',
-          443,
-          timeout: const Duration(seconds: 5),
-        );
-        stopwatch.stop();
-        socket.destroy();
-        samples.add(stopwatch.elapsedMilliseconds);
-      }
-      final average = samples.reduce((a, b) => a + b) / samples.length;
+      final results = await Future.wait(
+        NetworkDiagnostics.endpoints.map((endpoint) async {
+          final samples = <int?>[];
+          for (var attempt = 0; attempt < 3; attempt++) {
+            Socket? socket;
+            final stopwatch = Stopwatch()..start();
+            try {
+              socket = await Socket.connect(
+                endpoint.host,
+                endpoint.port,
+                timeout: const Duration(seconds: 4),
+              );
+              stopwatch.stop();
+              samples.add(stopwatch.elapsedMilliseconds);
+            } catch (_) {
+              stopwatch.stop();
+              samples.add(null);
+            } finally {
+              socket?.destroy();
+            }
+            if (attempt < 2) {
+              await Future.delayed(const Duration(milliseconds: 150));
+            }
+          }
+          return TcpEndpointResult(
+            endpoint: endpoint,
+            stats: NetworkDiagnostics.summarize(samples),
+          );
+        }),
+      );
+
       if (mounted) {
+        final successful = results.fold<int>(
+          0,
+          (total, result) => total + result.stats.successes,
+        );
+        final attempts = results.fold<int>(
+          0,
+          (total, result) => total + result.stats.attempts,
+        );
         setState(() {
+          tcpEndpointResults = results;
           tcpLatencyResult = tr(
-            'متوسط فتح اتصال TCP: ${average.toStringAsFixed(0)} ms\nالقراءات: ${samples.join(' / ')} ms',
-            'Average TCP connect time: ${average.toStringAsFixed(0)} ms\nSamples: ${samples.join(' / ')} ms',
+            'اكتمل الفحص: نجح $successful من $attempts اتصالاً.',
+            'Diagnostics complete: $successful of $attempts TCP connections succeeded.',
           );
         });
       }
@@ -2392,8 +2426,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       if (mounted) {
         setState(() {
           tcpLatencyResult = tr(
-            'تعذر الاتصال بخادم الاختبار: $error',
-            'Could not connect to the test server: $error',
+            'تعذر إكمال فحص الاتصال: $error',
+            'Could not complete the connection test: $error',
           );
         });
       }
@@ -2771,13 +2805,19 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               Row(children: [
                 Icon(Icons.network_ping, color: accentColor),
                 const SizedBox(width: 8),
-                Text(tr('اختبار زمن اتصال TCP', 'TCP connection latency'),
-                    style: TextStyle(color: primaryTextColor, fontWeight: FontWeight.w800)),
+                Expanded(
+                  child: Text(
+                    tr('تشخيص زمن الاتصال متعدد الوجهات', 'Multi-endpoint connection diagnostics'),
+                    style: TextStyle(color: primaryTextColor, fontWeight: FontWeight.w800),
+                  ),
+                ),
               ]),
               const SizedBox(height: 6),
               Text(
-                tr('يقيس زمن فتح اتصال TCP إلى 1.1.1.1 على المنفذ 443؛ هذا ليس ICMP Ping ولا يمثل سرعة التنزيل.',
-                  'Measures TCP connection setup time to 1.1.1.1:443. This is not ICMP ping and does not measure download speed.'),
+                tr(
+                  'يفحص اتصال TCP إلى Cloudflare وGoogle وQuad9، بثلاث محاولات لكل خادم. يعرض المتوسط والأدنى والأعلى وتذبذب القراءات ونسبة نجاح الاتصال. هذا ليس Ping من نوع ICMP ولا اختبار سرعة تنزيل أو رفع.',
+                  'Tests TCP connections to Cloudflare, Google and Quad9, with three attempts per endpoint. Shows average, minimum, maximum, average variation and connection success rate. This is not ICMP ping or a download/upload speed test.',
+                ),
                 style: TextStyle(color: mutedTextColor, fontSize: 11, height: 1.45),
               ),
               const SizedBox(height: 10),
@@ -2786,11 +2826,84 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                 icon: testingTcpLatency
                     ? const SizedBox(width: 17, height: 17, child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.play_arrow),
-                label: Text(tr('ابدأ الاختبار', 'Start test')),
+                label: Text(tr('ابدأ فحص الشبكة', 'Run network diagnostics')),
               ),
               if (tcpLatencyResult.isNotEmpty) ...[
                 const SizedBox(height: 10),
-                SelectableText(tcpLatencyResult, style: TextStyle(color: accentColor, height: 1.5)),
+                Text(tcpLatencyResult, style: TextStyle(color: accentColor, height: 1.5, fontWeight: FontWeight.w600)),
+              ],
+              if (tcpEndpointResults.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                ...tcpEndpointResults.map((result) {
+                  final stats = result.stats;
+                  final average = stats.averageMs;
+                  final variation = stats.averageVariationMs;
+                  return Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(11),
+                    decoration: BoxDecoration(
+                      color: subPanelColor,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: accentColor.withValues(alpha: 0.18)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                result.endpoint.label(isEnglish),
+                                style: TextStyle(color: primaryTextColor, fontWeight: FontWeight.w800),
+                              ),
+                            ),
+                            Text(
+                              '${stats.successes}/${stats.attempts}',
+                              style: TextStyle(
+                                color: stats.successes == stats.attempts ? const Color(0xFF16A36A) : accentColor,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Text(
+                          '${result.endpoint.host}:${result.endpoint.port}',
+                          style: TextStyle(color: mutedTextColor, fontSize: 10),
+                        ),
+                        const SizedBox(height: 7),
+                        if (average == null)
+                          Text(
+                            tr('تعذر إنشاء اتصال بهذا الخادم في المحاولات الثلاث.', 'All three connection attempts failed.'),
+                            style: TextStyle(color: mutedTextColor, fontSize: 12),
+                          )
+                        else
+                          Wrap(
+                            spacing: 7,
+                            runSpacing: 6,
+                            children: [
+                              Chip(
+                                label: Text('${tr('المتوسط', 'Avg')}: ${average.toStringAsFixed(1)} ms'),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              Chip(
+                                label: Text('${tr('الأدنى', 'Min')}: ${stats.minimumMs} ms'),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              Chip(
+                                label: Text('${tr('الأعلى', 'Max')}: ${stats.maximumMs} ms'),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              Chip(
+                                label: Text('${tr('التذبذب', 'Variation')}: ${variation == null ? '—' : '${variation.toStringAsFixed(1)} ms'}'),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                            ],
+                          ),
+                      ],
+                    ),
+                  );
+                }),
               ],
             ],
           ),
